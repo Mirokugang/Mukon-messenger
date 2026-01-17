@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, FlatList, StyleSheet } from 'react-native';
-import { List, FAB, Searchbar, Avatar, Badge } from 'react-native-paper';
+import { List, FAB, Searchbar, Avatar, Badge, Text } from 'react-native-paper';
 import { theme } from '../theme';
 import { truncateAddress } from '../utils/encryption';
 
@@ -44,7 +44,7 @@ export default function ContactsScreen({ navigation }: any) {
       )}
       right={(props) => (
         <View style={styles.rightContainer}>
-          <List.Text style={styles.timestamp}>{item.timestamp}</List.Text>
+          <Text style={styles.timestamp}>{item.timestamp}</Text>
           {item.unread > 0 && (
             <Badge style={styles.badge}>{item.unread}</Badge>
           )}
