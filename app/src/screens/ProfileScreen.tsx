@@ -1,19 +1,14 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert } from 'react-native';
 import { TextInput, Button, Text, Avatar, List } from 'react-native-paper';
 import { theme } from '../theme';
 import { truncateAddress } from '../utils/encryption';
+import { useWallet } from '../contexts/WalletContext';
 
 export default function ProfileScreen() {
-  const [displayName, setDisplayName] = React.useState('Alice');
-  const [avatarUrl, setAvatarUrl] = React.useState('');
+  const { publicKey, disconnect } = useWallet();
+  const [displayName, setDisplayName] = React.useState('');
   const [editing, setEditing] = React.useState(false);
-
-  // Mock wallet - replace with actual wallet from useMukonMessenger
-  const wallet = {
-    publicKey: '7xKpRmN...3mNqWt',
-    balance: '1.234 SOL',
-  };
 
   const saveProfile = async () => {
     // TODO: Use useMukonMessenger hook to update profile
@@ -21,12 +16,31 @@ export default function ProfileScreen() {
     setEditing(false);
   };
 
+  const handleDisconnect = () => {
+    Alert.alert(
+      'Disconnect Wallet',
+      'Are you sure you want to disconnect your wallet?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            await disconnect();
+          },
+        },
+      ]
+    );
+  };
+
+  const walletAddress = publicKey?.toBase58() || '';
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Avatar.Text
           size={96}
-          label={displayName[0].toUpperCase()}
+          label={displayName ? displayName[0].toUpperCase() : walletAddress[0].toUpperCase()}
           style={styles.avatar}
         />
         {editing ? (
@@ -34,28 +48,23 @@ export default function ProfileScreen() {
             value={displayName}
             onChangeText={setDisplayName}
             mode="outlined"
+            placeholder="Display name (optional)"
             style={styles.nameInput}
             outlineColor={theme.colors.surface}
             activeOutlineColor={theme.colors.primary}
           />
-        ) : (
+        ) : displayName ? (
           <Text style={styles.name}>{displayName}</Text>
-        )}
-        <Text style={styles.pubkey}>{truncateAddress(wallet.publicKey, 6)}</Text>
+        ) : null}
+        <Text style={styles.pubkey}>{truncateAddress(walletAddress, 6)}</Text>
       </View>
 
       <List.Section style={styles.section}>
         <List.Subheader style={styles.subheader}>Wallet</List.Subheader>
         <List.Item
           title="Address"
-          description={wallet.publicKey}
+          description={walletAddress}
           left={(props) => <List.Icon {...props} icon="wallet" />}
-          style={styles.listItem}
-        />
-        <List.Item
-          title="Balance"
-          description={wallet.balance}
-          left={(props) => <List.Icon {...props} icon="currency-usd" />}
           style={styles.listItem}
         />
       </List.Section>
@@ -83,6 +92,15 @@ export default function ProfileScreen() {
         buttonColor={theme.colors.primary}
       >
         {editing ? 'Save Profile' : 'Edit Profile'}
+      </Button>
+
+      <Button
+        mode="outlined"
+        onPress={handleDisconnect}
+        style={styles.button}
+        textColor={theme.colors.accent}
+      >
+        Disconnect Wallet
       </Button>
 
       <Text style={styles.version}>Mukon Messenger v1.0.0</Text>
