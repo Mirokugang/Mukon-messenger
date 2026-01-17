@@ -1,33 +1,68 @@
 import React from 'react';
-import { View, FlatList, StyleSheet } from 'react-native';
-import { List, FAB, Searchbar, Avatar, Badge, Text } from 'react-native-paper';
+import { View, FlatList, StyleSheet, Alert } from 'react-native';
+import { List, FAB, Searchbar, Avatar, Badge, Text, Button } from 'react-native-paper';
 import { theme } from '../theme';
 import { truncateAddress } from '../utils/encryption';
+import { useWallet } from '../contexts/WalletContext';
+import { useMukonMessenger } from '../hooks/useMukonMessenger';
 
 export default function ContactsScreen({ navigation }: any) {
+  const wallet = useWallet();
+  const messenger = useMukonMessenger(wallet, 'devnet');
   const [searchQuery, setSearchQuery] = React.useState('');
+  const [registering, setRegistering] = React.useState(false);
 
-  // Mock data - replace with actual contacts from useMukonMessenger hook
-  const contacts = [
-    {
-      id: '1',
-      displayName: 'Alice',
-      pubkey: '7xKpR...3mNq',
-      lastMessage: 'Hey, how are you?',
-      timestamp: '2m',
-      unread: 2,
-      avatar: null,
-    },
-    {
-      id: '2',
-      displayName: null,
-      pubkey: '9zYpL...8kWt',
-      lastMessage: 'Sent you an invite',
-      timestamp: '1h',
-      unread: 0,
-      avatar: null,
-    },
-  ];
+  // Register user if not already registered
+  const handleRegister = async () => {
+    setRegistering(true);
+    try {
+      await messenger.register(''); // Empty display name for now
+      Alert.alert('Success', 'Registration complete! You can now add contacts.');
+      await messenger.loadProfile();
+    } catch (error: any) {
+      console.error('Registration failed:', error);
+      Alert.alert('Error', 'Registration failed. Please try again.');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  // Show registration screen if not registered
+  if (messenger.profile === null && !messenger.loading) {
+    return (
+      <View style={styles.registrationContainer}>
+        <Avatar.Icon
+          size={120}
+          icon="account-plus"
+          style={styles.registrationIcon}
+        />
+        <Text style={styles.registrationTitle}>Welcome to Mukon!</Text>
+        <Text style={styles.registrationText}>
+          Register to start adding contacts and sending encrypted messages.
+        </Text>
+        <Button
+          mode="contained"
+          onPress={handleRegister}
+          loading={registering}
+          disabled={registering}
+          style={styles.registrationButton}
+          buttonColor={theme.colors.primary}
+        >
+          Register Now
+        </Button>
+      </View>
+    );
+  }
+
+  const contacts = messenger.contacts.map((contact, index) => ({
+    id: contact.publicKey.toBase58(),
+    displayName: contact.displayName,
+    pubkey: contact.publicKey.toBase58(),
+    lastMessage: '', // TODO: Get from messages
+    timestamp: '',
+    unread: 0,
+    avatar: contact.avatarUrl,
+  }));
 
   const renderContact = ({ item }: any) => (
     <List.Item
@@ -128,5 +163,32 @@ const styles = StyleSheet.create({
     right: 16,
     bottom: 88,
     backgroundColor: theme.colors.secondary,
+  },
+  registrationContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    backgroundColor: theme.colors.background,
+  },
+  registrationIcon: {
+    backgroundColor: theme.colors.primary,
+    marginBottom: 24,
+  },
+  registrationTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: theme.colors.textPrimary,
+    marginBottom: 12,
+  },
+  registrationText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  registrationButton: {
+    width: '100%',
+    maxWidth: 300,
   },
 });
