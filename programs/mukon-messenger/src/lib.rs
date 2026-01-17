@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use sha2::{Digest, Sha256};
+use arcium_anchor::prelude::*;
 
 declare_id!("89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr");
 
@@ -40,7 +41,7 @@ fn get_chat_hash(a: Pubkey, b: Pubkey) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-#[program]
+#[arcium_program]
 pub mod mukon_messenger {
     use super::*;
 
