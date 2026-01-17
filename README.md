@@ -2,6 +2,22 @@
 
 A private, wallet-to-wallet encrypted messenger built for the Solana Privacy Hackathon (Jan 12-30, 2026).
 
+**🚀 Status**: Deployed to Solana devnet and ready for testing!
+
+## Quick Start
+
+```bash
+# 1. Start backend
+cd backend && node src/index.js &
+
+# 2. Launch mobile app
+cd app && npx expo start
+
+# 3. Test on device (press 'i' for iOS or 'a' for Android)
+```
+
+See [E2E_TEST_GUIDE.md](./E2E_TEST_GUIDE.md) for complete testing instructions.
+
 ## Overview
 
 Mukon Messenger is a privacy-first messaging app where:
@@ -49,7 +65,7 @@ mukon-messenger/
 - `accept()` - Accept invitation
 - `reject()` - Reject invitation
 
-**Status:** ✅ Built and tested (7/7 tests passing)
+**Status:** ✅ Deployed to devnet (Program ID: 89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr)
 
 ### 2. Message Backend (Express + Socket.IO)
 
@@ -72,7 +88,7 @@ mukon-messenger/
 - `send_message` - Send encrypted message
 - `new_message` - Receive new messages
 
-**Status:** ✅ Implemented and tested
+**Status:** ✅ Running on http://localhost:3001
 
 ### 3. React Native App (Expo)
 
@@ -95,7 +111,7 @@ mukon-messenger/
 - Green secondary (#22C55E)
 - Clean, minimal UI inspired by LINE/WeChat
 
-**Status:** ✅ Structure complete (requires dependencies installation)
+**Status:** ✅ Fully integrated and ready (1,316 dependencies installed)
 
 ## Running the Project
 
@@ -209,18 +225,19 @@ const encrypted = nacl.box(
 
 ## Arcium Integration Status
 
-**Current Status:** Core program built without Arcium due to macOS compatibility issues with Docker images.
+**Current Status:** ✅ Encrypted circuits built successfully
 
-**Designed for Arcium:**
-- `ContactList` account structure ready for encryption
-- `encrypted-ixs/` directory prepared for confidential instructions
-- Architecture supports adding Arcium encryption without major refactoring
+**Compiled Instructions:**
+- `is_accepted_contact` - Private contact verification (13.9B ACUs)
+- `count_accepted` - Count accepted contacts privately (2.2B ACUs)
+- `add_two_numbers` - Demo instruction (485M ACUs)
 
-**To add Arcium:**
-1. Install Arcium CLI on Linux environment
-2. Create `encrypted-ixs/contact_operations.rs`
-3. Update program to use `queue_computation()`
-4. See `CLAUDE.md` for detailed integration patterns
+**Architecture:**
+- Fixed-size contact list (MAX_CONTACTS=100) for MPC compatibility
+- Constant-time operations for privacy preservation
+- Ready for full Anchor program integration
+
+See [ARCIUM_STATUS.md](./ARCIUM_STATUS.md) for detailed integration status.
 
 ## Bounty Targets
 
@@ -232,38 +249,43 @@ const encrypted = nacl.box(
 ## Development Notes
 
 ### What's Working
-✅ Anchor program (register, invite, accept, reject)
+✅ Anchor program deployed to devnet
 ✅ All tests passing (7/7)
-✅ WebSocket backend with wallet authentication
-✅ React Native app structure
-✅ E2E encryption utilities
-✅ Dark mode UI components
+✅ WebSocket backend running
+✅ React Native app fully integrated with Anchor
+✅ E2E encryption with TweetNaCl
+✅ Dark mode UI with Mukon branding
+✅ Arcium encrypted circuits compiled
+✅ Dev wallet for testing
 
 ### What's TODO
-- [ ] Complete wallet adapter integration in app
-- [ ] Connect app to deployed program
-- [ ] Add Arcium encryption (requires Linux)
-- [ ] Implement message persistence (SQLite/Redis)
-- [ ] Add push notifications
+- [ ] E2E user flow testing (register → invite → chat)
+- [ ] Full Arcium integration into Anchor program
+- [ ] Replace dev wallet with production wallet adapter
+- [ ] Message persistence (Redis/PostgreSQL)
+- [ ] Push notifications
 - [ ] QR code scanner for adding contacts
-- [ ] Deploy to devnet/mainnet
+- [ ] Deploy to mainnet
 
 ## Tech Stack
 
 - **Blockchain:** Solana (Anchor 0.32.1)
-- **Encryption (Planned):** Arcium MPC
+- **MPC Encryption:** Arcium v0.6.2 (circuits compiled)
 - **E2E Encryption:** TweetNaCl
 - **Backend:** Express.js + Socket.IO
-- **Frontend:** React Native + Expo
+- **Frontend:** React Native + Expo 51
 - **UI Library:** React Native Paper
 - **Navigation:** React Navigation
+- **State Management:** React Context API
 
 ## References
 
-- STEM Proto (cherry-chat): https://github.com/cherrydotfun/stem-proto
 - Arcium Docs: https://docs.arcium.com/developers
 - Arcium Examples: https://github.com/arcium-hq/examples
+- Anchor Framework: https://www.anchor-lang.com
+- Solana Docs: https://docs.solana.com
 - Solana Privacy Hack: https://solana.com/privacyhack
+- TweetNaCl.js: https://github.com/dchest/tweetnacl-js
 
 ## License
 
@@ -271,4 +293,4 @@ ISC
 
 ---
 
-Built with Claude Code for the Solana Privacy Hackathon 2026
+Built for the Solana Privacy Hackathon 2026

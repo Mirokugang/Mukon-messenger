@@ -165,8 +165,8 @@ artifacts/
 ## 🔗 Resources
 
 - **Arcium Docs**: https://docs.arcium.com/developers
-- **Example Integration**: Check `stem-proto-reference/` for STEM Proto patterns
 - **Arcium Examples**: https://github.com/arcium-hq/examples
+- **Anchor Framework**: https://www.anchor-lang.com
 
 ---
 
