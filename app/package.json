@@ -4,12 +4,18 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "android:dev": "expo run:android",
+    "android:build": "expo run:android --variant release",
+    "android:install": "adb install android/app/build/outputs/apk/debug/app-debug.apk",
+    "dev": "concurrently \"npm run android:dev\" \"npm run start --dev-client\"",
+    "prebuild": "expo prebuild --clean"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
+    "@craftzdog/react-native-buffer": "^6.1.1",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/stack": "^6.3.20",
@@ -22,8 +28,10 @@
     "react-native": "0.74.5",
     "react-native-get-random-values": "~1.11.0",
     "react-native-paper": "^5.12.0",
+    "react-native-quick-crypto": "^1.0.6",
     "react-native-safe-area-context": "4.10.5",
     "react-native-screens": "~3.31.1",
+    "readable-stream": "^4.7.0",
     "socket.io-client": "^4.7.0",
     "tweetnacl": "^1.0.3"
   },
