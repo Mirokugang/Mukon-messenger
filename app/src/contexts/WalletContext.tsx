@@ -39,16 +39,26 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setConnecting(true);
     try {
       await transact(async (wallet) => {
+        console.log('Starting wallet authorization...');
+
         const authResult = await wallet.authorize({
           cluster: 'devnet',
           identity: APP_IDENTITY,
         });
 
+        console.log('Authorization successful, processing result...');
+        console.log('Auth result accounts:', authResult.accounts?.length);
+
         // MWA returns address as base64-encoded string
         // Decode it to Uint8Array, then create PublicKey
         const base64Address = authResult.accounts[0].address;
+        console.log('Base64 address:', base64Address);
+
         const publicKeyBytes = toUint8Array(base64Address);
+        console.log('Public key bytes length:', publicKeyBytes.length);
+
         const pubkey = new PublicKey(publicKeyBytes);
+        console.log('PublicKey created successfully:', pubkey.toBase58());
 
         setPublicKey(pubkey);
         setConnected(true);
@@ -56,6 +66,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
     } catch (error) {
       console.error('Failed to connect wallet:', error);
+      console.error('Error stack:', error.stack);
       throw error;
     } finally {
       setConnecting(false);
