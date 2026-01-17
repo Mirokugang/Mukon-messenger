@@ -1,22 +1,26 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Connection, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import { Program, AnchorProvider, Idl, web3 } from '@coral-xyz/anchor';
+import { Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import io, { Socket } from 'socket.io-client';
 import { encryptMessage, decryptMessage, getChatHash, truncateAddress } from '../utils/encryption';
+import {
+  createRegisterInstruction,
+  createInviteInstruction,
+  createAcceptInstruction,
+  createRejectInstruction,
+  buildAndSendTransaction,
+  getWalletDescriptorPDA,
+  getUserProfilePDA,
+} from '../utils/transactions';
 import nacl from 'tweetnacl';
 import { Buffer } from 'buffer';
-import IDL from '../idl.json';
 
 const PROGRAM_ID = new PublicKey('89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr');
 const BACKEND_URL = 'http://localhost:3001';
-const WALLET_DESCRIPTOR_VERSION = Buffer.from([1]);
-const USER_PROFILE_VERSION = Buffer.from([1]);
-const CONVERSATION_VERSION = Buffer.from([1]);
 
 interface Wallet {
   publicKey: PublicKey | null;
   signMessage: (message: Uint8Array) => Promise<Uint8Array>;
-  signTransaction: (transaction: any) => Promise<any>;
+  signTransaction: (transaction: VersionedTransaction) => Promise<VersionedTransaction>;
 }
 
 export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devnet') {
@@ -37,40 +41,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     [cluster]
   );
 
-  // Initialize program
-  const program = useMemo(() => {
-    if (!wallet?.publicKey) return null;
-
-    try {
-      const provider = new AnchorProvider(
-        connection,
-        wallet as any,
-        { commitment: 'confirmed' }
-      );
-
-      return new Program(IDL as Idl, PROGRAM_ID, provider);
-    } catch (error) {
-      console.error('Failed to initialize Anchor program:', error);
-      // Anchor has compatibility issues with React Native
-      // We'll need to build transactions manually
-      return null;
-    }
-  }, [wallet, connection]);
-
-  // Get PDAs for a wallet
-  const getPDAs = (pubkey: PublicKey) => {
-    const [walletDescriptor] = PublicKey.findProgramAddressSync(
-      [Buffer.from('wallet_descriptor'), pubkey.toBuffer(), WALLET_DESCRIPTOR_VERSION],
-      PROGRAM_ID
-    );
-
-    const [userProfile] = PublicKey.findProgramAddressSync(
-      [Buffer.from('user_profile'), pubkey.toBuffer(), USER_PROFILE_VERSION],
-      PROGRAM_ID
-    );
-
-    return { walletDescriptor, userProfile };
-  };
+  // No Anchor program needed - we build transactions manually
 
   // Initialize socket connection
   useEffect(() => {
@@ -122,26 +93,23 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
    * Register a new user with display name
    */
   const register = async (displayName: string) => {
-    if (!wallet?.publicKey || !program) throw new Error('Wallet not connected');
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
 
     setLoading(true);
     try {
-      const { walletDescriptor, userProfile } = getPDAs(wallet.publicKey);
+      const instruction = createRegisterInstruction(wallet.publicKey, displayName);
 
-      const tx = await program.methods
-        .register(displayName)
-        .accounts({
-          walletDescriptor,
-          userProfile,
-          payer: wallet.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      const signature = await buildAndSendTransaction(
+        connection,
+        wallet.publicKey,
+        [instruction],
+        wallet.signTransaction
+      );
 
-      console.log('Registered user:', displayName, 'TX:', tx);
+      console.log('Registered user:', displayName, 'TX:', signature);
 
       setProfile({ displayName, publicKey: wallet.publicKey });
-      return tx;
+      return signature;
     } catch (error) {
       console.error('Failed to register:', error);
       throw error;
@@ -152,30 +120,21 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   /**
    * Update user profile
+   * TODO: Implement updateProfile instruction builder
    */
   const updateProfile = async (displayName?: string, avatarUrl?: string) => {
-    if (!wallet?.publicKey || !program) throw new Error('Wallet not connected');
+    if (!wallet?.publicKey) throw new Error('Wallet not connected');
 
     setLoading(true);
     try {
-      const { userProfile } = getPDAs(wallet.publicKey);
-
-      const tx = await program.methods
-        .updateProfile(displayName || null, avatarUrl || null)
-        .accounts({
-          userProfile,
-          payer: wallet.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      console.log('Updated profile, TX:', tx);
+      // TODO: Create updateProfile instruction and send transaction
+      console.warn('updateProfile not yet implemented with manual transactions');
 
       if (displayName) {
         setProfile((prev: any) => ({ ...prev, displayName }));
       }
 
-      return tx;
+      return 'placeholder-signature';
     } catch (error) {
       console.error('Failed to update profile:', error);
       throw error;
@@ -188,33 +147,27 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
    * Invite a contact
    */
   const invite = async (contactPubkey: PublicKey) => {
-    if (!wallet?.publicKey || !program) throw new Error('Wallet not connected');
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
 
     setLoading(true);
     try {
-      const { walletDescriptor: payerDescriptor } = getPDAs(wallet.publicKey);
-      const { walletDescriptor: inviteeDescriptor } = getPDAs(contactPubkey);
-
       const chatHash = getChatHash(wallet.publicKey, contactPubkey);
-      const [conversation] = PublicKey.findProgramAddressSync(
-        [Buffer.from('conversation'), chatHash, CONVERSATION_VERSION],
-        PROGRAM_ID
+
+      const instruction = createInviteInstruction(
+        wallet.publicKey,
+        contactPubkey,
+        chatHash
       );
 
-      const tx = await program.methods
-        .invite(Array.from(chatHash))
-        .accounts({
-          payer: wallet.publicKey,
-          invitee: contactPubkey,
-          payerDescriptor,
-          inviteeDescriptor,
-          conversation,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      const signature = await buildAndSendTransaction(
+        connection,
+        wallet.publicKey,
+        [instruction],
+        wallet.signTransaction
+      );
 
-      console.log('Sent invitation to:', contactPubkey.toBase58(), 'TX:', tx);
-      return tx;
+      console.log('Sent invitation to:', contactPubkey.toBase58(), 'TX:', signature);
+      return signature;
     } catch (error) {
       console.error('Failed to invite:', error);
       throw error;
@@ -227,26 +180,22 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
    * Accept an invitation
    */
   const acceptInvitation = async (peerPubkey: PublicKey) => {
-    if (!wallet?.publicKey || !program) throw new Error('Wallet not connected');
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
 
     setLoading(true);
     try {
-      const { walletDescriptor: payerDescriptor } = getPDAs(wallet.publicKey);
-      const { walletDescriptor: peerDescriptor } = getPDAs(peerPubkey);
+      const instruction = createAcceptInstruction(wallet.publicKey, peerPubkey);
 
-      const tx = await program.methods
-        .accept()
-        .accounts({
-          payer: wallet.publicKey,
-          peer: peerPubkey,
-          payerDescriptor,
-          peerDescriptor,
-        })
-        .rpc();
+      const signature = await buildAndSendTransaction(
+        connection,
+        wallet.publicKey,
+        [instruction],
+        wallet.signTransaction
+      );
 
-      console.log('Accepted invitation from:', peerPubkey.toBase58(), 'TX:', tx);
+      console.log('Accepted invitation from:', peerPubkey.toBase58(), 'TX:', signature);
       await loadContacts(); // Refresh contacts
-      return tx;
+      return signature;
     } catch (error) {
       console.error('Failed to accept invitation:', error);
       throw error;
@@ -259,26 +208,22 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
    * Reject an invitation
    */
   const rejectInvitation = async (peerPubkey: PublicKey) => {
-    if (!wallet?.publicKey || !program) throw new Error('Wallet not connected');
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
 
     setLoading(true);
     try {
-      const { walletDescriptor: payerDescriptor } = getPDAs(wallet.publicKey);
-      const { walletDescriptor: peerDescriptor } = getPDAs(peerPubkey);
+      const instruction = createRejectInstruction(wallet.publicKey, peerPubkey);
 
-      const tx = await program.methods
-        .reject()
-        .accounts({
-          payer: wallet.publicKey,
-          peer: peerPubkey,
-          payerDescriptor,
-          peerDescriptor,
-        })
-        .rpc();
+      const signature = await buildAndSendTransaction(
+        connection,
+        wallet.publicKey,
+        [instruction],
+        wallet.signTransaction
+      );
 
-      console.log('Rejected invitation from:', peerPubkey.toBase58(), 'TX:', tx);
+      console.log('Rejected invitation from:', peerPubkey.toBase58(), 'TX:', signature);
       await loadContacts();
-      return tx;
+      return signature;
     } catch (error) {
       console.error('Failed to reject invitation:', error);
       throw error;
@@ -325,45 +270,23 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   /**
    * Load contacts from chain
+   * TODO: Implement account deserialization
    */
   const loadContacts = async () => {
-    if (!wallet?.publicKey || !program) return;
+    if (!wallet?.publicKey) return;
 
     setLoading(true);
     try {
-      const { walletDescriptor } = getPDAs(wallet.publicKey);
+      const walletDescriptor = getWalletDescriptorPDA(wallet.publicKey);
 
-      const descriptorAccount = await program.account.walletDescriptor.fetch(walletDescriptor);
+      // TODO: Fetch and deserialize WalletDescriptor account manually
+      // const accountInfo = await connection.getAccountInfo(walletDescriptor);
+      // const descriptorAccount = deserializeWalletDescriptor(accountInfo.data);
 
-      // Get all accepted peers
-      const acceptedPeers = descriptorAccount.peers.filter(
-        (peer: any) => peer.state.accepted !== undefined
-      );
+      console.warn('loadContacts not yet implemented with manual deserialization');
 
-      // Fetch each peer's profile
-      const contactsData = await Promise.all(
-        acceptedPeers.map(async (peer: any) => {
-          try {
-            const { userProfile } = getPDAs(peer.wallet);
-            const profileAccount = await program.account.userProfile.fetch(userProfile);
-
-            return {
-              publicKey: peer.wallet,
-              displayName: profileAccount.displayName,
-              avatarUrl: profileAccount.avatarUrl,
-            };
-          } catch (error) {
-            // Profile might not exist
-            return {
-              publicKey: peer.wallet,
-              displayName: null,
-              avatarUrl: null,
-            };
-          }
-        })
-      );
-
-      setContacts(contactsData);
+      // Placeholder: empty contacts list
+      setContacts([]);
     } catch (error) {
       console.error('Failed to load contacts:', error);
     } finally {
@@ -373,17 +296,24 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   /**
    * Load user profile
+   * TODO: Implement account deserialization
    */
   const loadProfile = async () => {
-    if (!wallet?.publicKey || !program) return;
+    if (!wallet?.publicKey) return;
 
     try {
-      const { userProfile } = getPDAs(wallet.publicKey);
-      const profileAccount = await program.account.userProfile.fetch(userProfile);
+      const userProfile = getUserProfilePDA(wallet.publicKey);
 
+      // TODO: Fetch and deserialize UserProfile account manually
+      // const accountInfo = await connection.getAccountInfo(userProfile);
+      // const profileAccount = deserializeUserProfile(accountInfo.data);
+
+      console.warn('loadProfile not yet implemented with manual deserialization');
+
+      // For now, just set publicKey without display name
       setProfile({
-        displayName: profileAccount.displayName,
-        avatarUrl: profileAccount.avatarUrl,
+        displayName: null,
+        avatarUrl: null,
         publicKey: wallet.publicKey,
       });
     } catch (error) {
@@ -394,15 +324,14 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   // Load profile and contacts on wallet connect
   useEffect(() => {
-    if (wallet?.publicKey && program) {
+    if (wallet?.publicKey) {
       loadProfile();
       loadContacts();
     }
-  }, [wallet?.publicKey, program]);
+  }, [wallet?.publicKey]);
 
   return {
     connection,
-    program,
     wallet,
     socket,
     profile,
