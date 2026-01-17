@@ -6,6 +6,14 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 
 **Goal:** Win multiple bounties ($48K+ potential) by creating a privacy-first messenger that integrates Arcium for encrypted on-chain state.
 
+## Development Guidelines
+
+**IMPORTANT - Dev Servers:**
+- NEVER run dev servers (npx expo start, npm run dev, etc.) - only the user should run these
+- User needs to see device logs directly, which are not visible to Claude
+- Only run builds (npx expo run:android) when explicitly requested
+- All other testing/debugging should be done by the user running their own dev servers
+
 ## What We're Building
 
 A 1:1 encrypted messenger (like Line/WeChat DMs) where:
