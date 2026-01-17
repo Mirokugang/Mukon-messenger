@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { transact } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
+import { toUint8Array } from 'js-base64';
 
 interface WalletContextType {
   publicKey: PublicKey | null;
@@ -43,24 +44,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           identity: APP_IDENTITY,
         });
 
-        console.log('Auth result:', JSON.stringify(authResult, null, 2));
-        console.log('Account address type:', typeof authResult.accounts[0].address);
-        console.log('Account address:', authResult.accounts[0].address);
-
-        // MWA returns address as Uint8Array - convert to PublicKey
-        const addressBytes = authResult.accounts[0].address;
-
-        // If it's already a Uint8Array, use it directly
-        let pubkey: PublicKey;
-        if (addressBytes instanceof Uint8Array) {
-          pubkey = new PublicKey(addressBytes);
-        } else if (typeof addressBytes === 'string') {
-          // If it's a string, try to parse as base58
-          pubkey = new PublicKey(addressBytes);
-        } else {
-          // Convert to Uint8Array if needed
-          pubkey = new PublicKey(new Uint8Array(addressBytes));
-        }
+        // MWA returns address as base64-encoded string
+        // Decode it to Uint8Array, then create PublicKey
+        const base64Address = authResult.accounts[0].address;
+        const publicKeyBytes = toUint8Array(base64Address);
+        const pubkey = new PublicKey(publicKeyBytes);
 
         setPublicKey(pubkey);
         setConnected(true);
@@ -68,7 +56,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
     } catch (error) {
       console.error('Failed to connect wallet:', error);
-      console.error('Error details:', error);
       throw error;
     } finally {
       setConnecting(false);
