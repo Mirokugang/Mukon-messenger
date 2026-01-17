@@ -1,0 +1,44 @@
+# Anchor
+.anchor
+target/
+**/*.rs.bk
+keypair.json
+
+# Node
+node_modules/
+.env
+.env.local
+
+# Expo
+app/.expo/
+app/dist/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Private keys
+*.pem
+id.json
+
+# Test
+test-ledger/
