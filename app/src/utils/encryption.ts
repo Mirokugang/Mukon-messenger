@@ -1,5 +1,6 @@
 import nacl from 'tweetnacl';
 import { PublicKey } from '@solana/web3.js';
+import { sha256 } from 'js-sha256';
 
 /**
  * Derives an encryption keypair from a wallet signature
@@ -69,7 +70,6 @@ export function decryptMessage(
  * Gets a deterministic chat hash from two public keys (sorted)
  */
 export function getChatHash(a: PublicKey, b: PublicKey): Uint8Array {
-  const crypto = require('crypto');
   const combined = Buffer.alloc(64);
 
   // Sort pubkeys deterministically
@@ -81,7 +81,9 @@ export function getChatHash(a: PublicKey, b: PublicKey): Uint8Array {
     a.toBuffer().copy(combined, 32);
   }
 
-  return crypto.createHash('sha256').update(combined).digest();
+  // Use js-sha256 instead of Node's crypto
+  const hash = sha256.array(combined);
+  return new Uint8Array(hash);
 }
 
 /**
