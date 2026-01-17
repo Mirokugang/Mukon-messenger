@@ -1,9 +1,14 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Alert } from 'react-native';
 import { TextInput, Button, Text, IconButton } from 'react-native-paper';
+import { PublicKey } from '@solana/web3.js';
 import { theme } from '../theme';
+import { useWallet } from '../contexts/WalletContext';
+import { useMukonMessenger } from '../hooks/useMukonMessenger';
 
 export default function AddContactScreen({ navigation }: any) {
+  const wallet = useWallet();
+  const messenger = useMukonMessenger(wallet, 'devnet');
   const [address, setAddress] = React.useState('');
   const [loading, setLoading] = React.useState(false);
 
@@ -12,13 +17,32 @@ export default function AddContactScreen({ navigation }: any) {
 
     setLoading(true);
     try {
-      // TODO: Use useMukonMessenger hook to send invitation
-      console.log('Sending invitation to:', address);
+      // Validate and parse the address
+      const contactPubkey = new PublicKey(address.trim());
 
-      // Navigate back on success
-      navigation.goBack();
-    } catch (error) {
+      // Send invitation on-chain
+      const tx = await messenger.invite(contactPubkey);
+
+      Alert.alert(
+        'Invitation Sent!',
+        `Invitation sent to ${address.slice(0, 8)}...\n\nTransaction: ${tx.slice(0, 8)}...`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Refresh contacts and navigate back
+              messenger.loadContacts();
+              navigation.goBack();
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
       console.error('Failed to send invitation:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to send invitation. Please check the address and try again.'
+      );
     } finally {
       setLoading(false);
     }
