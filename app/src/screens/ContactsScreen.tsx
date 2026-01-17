@@ -27,8 +27,28 @@ export default function ContactsScreen({ navigation }: any) {
     }
   };
 
+  // Show error if program failed to initialize
+  if (!messenger.program && wallet.connected) {
+    return (
+      <View style={styles.registrationContainer}>
+        <Avatar.Icon
+          size={120}
+          icon="alert-circle"
+          style={[styles.registrationIcon, { backgroundColor: theme.colors.accent }]}
+        />
+        <Text style={styles.registrationTitle}>Initialization Failed</Text>
+        <Text style={styles.registrationText}>
+          There was an error initializing the Solana program. This is likely due to compatibility issues with Anchor in React Native.
+        </Text>
+        <Text style={[styles.registrationText, { fontSize: 14, marginTop: 16 }]}>
+          We're working on a fix. Please check back later.
+        </Text>
+      </View>
+    );
+  }
+
   // Show registration screen if not registered
-  if (messenger.profile === null && !messenger.loading) {
+  if (messenger.profile === null && !messenger.loading && messenger.program) {
     return (
       <View style={styles.registrationContainer}>
         <Avatar.Icon

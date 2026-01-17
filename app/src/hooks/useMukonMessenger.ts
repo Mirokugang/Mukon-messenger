@@ -41,13 +41,20 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
   const program = useMemo(() => {
     if (!wallet?.publicKey) return null;
 
-    const provider = new AnchorProvider(
-      connection,
-      wallet as any,
-      { commitment: 'confirmed' }
-    );
+    try {
+      const provider = new AnchorProvider(
+        connection,
+        wallet as any,
+        { commitment: 'confirmed' }
+      );
 
-    return new Program(IDL as Idl, PROGRAM_ID, provider);
+      return new Program(IDL as Idl, PROGRAM_ID, provider);
+    } catch (error) {
+      console.error('Failed to initialize Anchor program:', error);
+      // Anchor has compatibility issues with React Native
+      // We'll need to build transactions manually
+      return null;
+    }
   }, [wallet, connection]);
 
   // Get PDAs for a wallet
