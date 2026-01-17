@@ -8,7 +8,6 @@ module.exports = function(api) {
         {
           alias: {
             stream: 'readable-stream',
-            buffer: '@craftzdog/react-native-buffer',
             assert: 'assert',
           },
         },

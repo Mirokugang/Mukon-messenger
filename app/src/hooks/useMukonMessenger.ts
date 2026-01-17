@@ -4,7 +4,7 @@ import { Program, AnchorProvider, Idl, web3 } from '@coral-xyz/anchor';
 import io, { Socket } from 'socket.io-client';
 import { encryptMessage, decryptMessage, getChatHash, truncateAddress } from '../utils/encryption';
 import nacl from 'tweetnacl';
-import { Buffer } from '@craftzdog/react-native-buffer';
+import { Buffer } from 'buffer';
 import IDL from '../idl.json';
 
 const PROGRAM_ID = new PublicKey('89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr');

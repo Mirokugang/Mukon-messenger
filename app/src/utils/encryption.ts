@@ -1,7 +1,7 @@
 import nacl from 'tweetnacl';
 import { PublicKey } from '@solana/web3.js';
 import { sha256 } from 'js-sha256';
-import { Buffer } from '@craftzdog/react-native-buffer';
+import { Buffer } from 'buffer';
 
 /**
  * Derives an encryption keypair from a wallet signature
