@@ -1,7 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Keypair, PublicKey } from '@solana/web3.js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import nacl from 'tweetnacl';
+import React, { createContext, useContext, useState, useCallback } from 'react';
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { transact } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
 
 interface WalletContextType {
   publicKey: PublicKey | null;
@@ -10,7 +9,8 @@ interface WalletContextType {
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   signMessage: (message: Uint8Array) => Promise<Uint8Array>;
-  signTransaction: (transaction: any) => Promise<any>;
+  signTransaction: (transaction: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
+  signAndSendTransaction: (transaction: Transaction | VersionedTransaction) => Promise<string>;
 }
 
 const WalletContext = createContext<WalletContextType | null>(null);
@@ -23,87 +23,131 @@ export const useWallet = () => {
   return context;
 };
 
-/**
- * Simple wallet provider for development/testing
- * TODO: Replace with @solana-mobile/wallet-adapter-mobile for production
- */
+const APP_IDENTITY = {
+  name: 'Mukon Messenger',
+  uri: 'https://mukon.app',
+  icon: 'icon.png',
+};
+
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [keypair, setKeypair] = useState<Keypair | null>(null);
+  const [publicKey, setPublicKey] = useState<PublicKey | null>(null);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
 
-  useEffect(() => {
-    // Auto-load saved wallet on mount
-    loadWallet();
-  }, []);
-
-  const loadWallet = async () => {
-    try {
-      const saved = await AsyncStorage.getItem('dev_wallet');
-      if (saved) {
-        const secretKey = Uint8Array.from(JSON.parse(saved));
-        const kp = Keypair.fromSecretKey(secretKey);
-        setKeypair(kp);
-        setConnected(true);
-      }
-    } catch (error) {
-      console.error('Failed to load wallet:', error);
-    }
-  };
-
-  const connect = async () => {
+  const connect = useCallback(async () => {
     setConnecting(true);
     try {
-      let kp = keypair;
+      await transact(async (wallet) => {
+        const authResult = await wallet.authorize({
+          cluster: 'devnet',
+          identity: APP_IDENTITY,
+        });
 
-      if (!kp) {
-        // Generate new dev wallet
-        kp = Keypair.generate();
-
-        // Save it
-        await AsyncStorage.setItem(
-          'dev_wallet',
-          JSON.stringify(Array.from(kp.secretKey))
-        );
-
-        setKeypair(kp);
-      }
-
-      setConnected(true);
-      console.log('Wallet connected:', kp.publicKey.toBase58());
+        const pubkey = new PublicKey(authResult.accounts[0].address);
+        setPublicKey(pubkey);
+        setConnected(true);
+        console.log('Wallet connected:', pubkey.toBase58());
+      });
     } catch (error) {
       console.error('Failed to connect wallet:', error);
       throw error;
     } finally {
       setConnecting(false);
     }
-  };
+  }, []);
 
-  const disconnect = async () => {
-    setKeypair(null);
-    setConnected(false);
-    await AsyncStorage.removeItem('dev_wallet');
-  };
+  const disconnect = useCallback(async () => {
+    try {
+      await transact(async (wallet) => {
+        await wallet.deauthorize();
+      });
+    } catch (error) {
+      console.error('Failed to disconnect:', error);
+    } finally {
+      setPublicKey(null);
+      setConnected(false);
+    }
+  }, []);
 
-  const signMessage = async (message: Uint8Array): Promise<Uint8Array> => {
-    if (!keypair) throw new Error('Wallet not connected');
-    return nacl.sign.detached(message, keypair.secretKey);
-  };
+  const signMessage = useCallback(async (message: Uint8Array): Promise<Uint8Array> => {
+    if (!publicKey) throw new Error('Wallet not connected');
 
-  const signTransaction = async (transaction: any): Promise<any> => {
-    if (!keypair) throw new Error('Wallet not connected');
-    transaction.sign(keypair);
-    return transaction;
-  };
+    return await transact(async (wallet) => {
+      const authResult = await wallet.authorize({
+        cluster: 'devnet',
+        identity: APP_IDENTITY,
+      });
+
+      const signedMessages = await wallet.signMessages({
+        addresses: [authResult.accounts[0].address],
+        payloads: [message],
+      });
+
+      return signedMessages[0];
+    });
+  }, [publicKey]);
+
+  const signTransaction = useCallback(async (
+    transaction: Transaction | VersionedTransaction
+  ): Promise<Transaction | VersionedTransaction> => {
+    if (!publicKey) throw new Error('Wallet not connected');
+
+    return await transact(async (wallet) => {
+      const authResult = await wallet.authorize({
+        cluster: 'devnet',
+        identity: APP_IDENTITY,
+      });
+
+      const serialized = transaction.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      });
+
+      const signedTxs = await wallet.signTransactions({
+        transactions: [serialized],
+      });
+
+      if (transaction instanceof VersionedTransaction) {
+        return VersionedTransaction.deserialize(signedTxs[0]);
+      } else {
+        return Transaction.from(signedTxs[0]);
+      }
+    });
+  }, [publicKey]);
+
+  const signAndSendTransaction = useCallback(async (
+    transaction: Transaction | VersionedTransaction
+  ): Promise<string> => {
+    if (!publicKey) throw new Error('Wallet not connected');
+
+    return await transact(async (wallet) => {
+      const authResult = await wallet.authorize({
+        cluster: 'devnet',
+        identity: APP_IDENTITY,
+      });
+
+      const serialized = transaction.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      });
+
+      const result = await wallet.signAndSendTransactions({
+        transactions: [serialized],
+      });
+
+      return result.signatures[0];
+    });
+  }, [publicKey]);
 
   const value: WalletContextType = {
-    publicKey: keypair?.publicKey || null,
+    publicKey,
     connected,
     connecting,
     connect,
     disconnect,
     signMessage,
     signTransaction,
+    signAndSendTransaction,
   };
 
   return (
