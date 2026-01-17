@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, StyleSheet, Image } from 'react-native';
-import { Button, Text, ActivityIndicator } from 'react-native-paper';
+import { View, StyleSheet } from 'react-native';
+import { Button, Text, Avatar } from 'react-native-paper';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
 
@@ -18,10 +18,10 @@ export default function WalletConnectScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        <Image
-          source={require('../../assets/logo.jpg')}
+        <Avatar.Icon
+          size={120}
+          icon="message-lock"
           style={styles.logo}
-          resizeMode="contain"
         />
         <Text style={styles.title}>Mukon Messenger</Text>
         <Text style={styles.subtitle}>
@@ -66,9 +66,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logo: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    backgroundColor: theme.colors.primary,
     marginBottom: 24,
   },
   title: {
