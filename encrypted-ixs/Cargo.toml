@@ -4,8 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arcis-proc-macro = "0.1"
-arcis-core = "0.1"
-
-[lib]
-crate-type = ["cdylib", "lib"]
+arcis = "0.6.2"
+blake3 = "=1.8.2"
