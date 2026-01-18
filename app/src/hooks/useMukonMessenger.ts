@@ -296,7 +296,6 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   /**
    * Load user profile
-   * TODO: Implement account deserialization
    */
   const loadProfile = async () => {
     if (!wallet?.publicKey) return;
@@ -304,21 +303,27 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     try {
       const userProfile = getUserProfilePDA(wallet.publicKey);
 
-      // TODO: Fetch and deserialize UserProfile account manually
-      // const accountInfo = await connection.getAccountInfo(userProfile);
-      // const profileAccount = deserializeUserProfile(accountInfo.data);
+      // Check if account exists on-chain
+      const accountInfo = await connection.getAccountInfo(userProfile);
 
-      console.warn('loadProfile not yet implemented with manual deserialization');
+      if (!accountInfo) {
+        // Account doesn't exist - user needs to register
+        console.log('No profile found, user needs to register');
+        setProfile(null);
+        return;
+      }
 
-      // For now, just set publicKey without display name
+      // Account exists but we haven't implemented deserialization yet
+      // For now, set a placeholder profile
+      console.warn('Profile exists but deserialization not yet implemented');
       setProfile({
-        displayName: null,
+        displayName: 'User', // Placeholder until we deserialize
         avatarUrl: null,
         publicKey: wallet.publicKey,
       });
     } catch (error) {
-      // Profile doesn't exist yet
-      console.log('No profile found, user needs to register');
+      console.error('Failed to load profile:', error);
+      setProfile(null);
     }
   };
 

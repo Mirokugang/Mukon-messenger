@@ -40,7 +40,7 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <Avatar.Text
           size={96}
-          label={displayName ? displayName[0].toUpperCase() : walletAddress[0].toUpperCase()}
+          label={displayName ? displayName[0].toUpperCase() : walletAddress ? walletAddress[0].toUpperCase() : '?'}
           style={styles.avatar}
         />
         {editing ? (
