@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import io, { Socket } from 'socket.io-client';
 import { encryptMessage, decryptMessage, getChatHash, truncateAddress, deriveEncryptionKeypair } from '../utils/encryption';
@@ -15,7 +15,9 @@ import nacl from 'tweetnacl';
 import { Buffer } from 'buffer';
 
 const PROGRAM_ID = new PublicKey('89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr');
-const BACKEND_URL = 'http://localhost:3001';
+// For Android emulator, use 10.0.2.2 instead of localhost
+// For physical device, use your computer's IP address
+const BACKEND_URL = 'http://10.0.2.2:3001';
 
 interface Wallet {
   publicKey: PublicKey | null;
@@ -33,6 +35,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [encryptionKeys, setEncryptionKeys] = useState<nacl.BoxKeyPair | null>(null);
   const [encryptionReady, setEncryptionReady] = useState(false);
+  const derivingKeys = useRef(false);
 
   // Initialize connection
   const connection = useMemo(
@@ -47,22 +50,32 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   // No Anchor program needed - we build transactions manually
 
-  // Derive encryption keys FIRST when wallet connects (REQUIRED)
+  // Derive encryption keys ONCE when wallet connects (REQUIRED)
   useEffect(() => {
     if (!wallet?.publicKey || !wallet.signMessage) {
       setEncryptionReady(false);
+      setEncryptionKeys(null);
+      derivingKeys.current = false;
       return;
     }
 
+    // Already have keys - don't re-derive
     if (encryptionKeys) {
       setEncryptionReady(true);
       return;
     }
 
+    // Already deriving - don't start again
+    if (derivingKeys.current) {
+      return;
+    }
+
+    derivingKeys.current = true;
+
     const deriveKeys = async () => {
       try {
-        console.log('🔐 Deriving encryption keys from wallet signature...');
-        const message = 'Sign this message to derive your encryption keys for Mukon Messenger.\n\nThis is required for private messaging and only happens once.';
+        console.log('🔐 Deriving encryption keys from wallet signature (ONCE)...');
+        const message = 'Sign this message to derive your encryption keys for Mukon Messenger.\n\nThis only happens once.';
         const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
         const keys = deriveEncryptionKeypair(signature);
         setEncryptionKeys(keys);
@@ -71,11 +84,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       } catch (error) {
         console.error('❌ Failed to derive encryption keys:', error);
         setEncryptionReady(false);
-        // Retry after a delay
-        setTimeout(() => {
-          console.log('🔄 Retrying encryption key derivation...');
-          deriveKeys();
-        }, 2000);
+        derivingKeys.current = false;
       }
     };
 
@@ -357,17 +366,37 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       const messageBytes = new TextEncoder().encode(content);
       const encrypted = nacl.secretbox(messageBytes, nonce, sharedSecret);
 
+      const timestamp = Date.now();
+      const encryptedBase64 = Buffer.from(encrypted).toString('base64');
+      const nonceBase64 = Buffer.from(nonce).toString('base64');
+
       socket.emit('send_message', {
         conversationId,
-        encrypted: Buffer.from(encrypted).toString('base64'),
-        nonce: Buffer.from(nonce).toString('base64'),
+        encrypted: encryptedBase64,
+        nonce: nonceBase64,
         sender: wallet.publicKey.toBase58(),
-        timestamp: Date.now(),
+        timestamp,
       });
 
       console.log('✅ Encrypted message sent via socket');
 
-      // Don't add optimistically - wait for server confirmation to avoid duplicates
+      // Add message optimistically so sender sees it immediately
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        const conversationMessages = updated.get(conversationId) || [];
+        updated.set(conversationId, [
+          ...conversationMessages,
+          {
+            id: `temp-${timestamp}`,
+            conversationId,
+            sender: wallet.publicKey!.toBase58(),
+            encrypted: encryptedBase64,
+            nonce: nonceBase64,
+            timestamp,
+          },
+        ]);
+        return updated;
+      })
     } catch (error) {
       console.error('Failed to send message:', error);
       throw error;
