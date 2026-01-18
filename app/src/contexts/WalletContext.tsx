@@ -34,6 +34,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [publicKey, setPublicKey] = useState<PublicKey | null>(null);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   const connect = useCallback(async () => {
     setConnecting(true);
@@ -48,6 +49,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         console.log('Authorization successful, processing result...');
         console.log('Auth result accounts:', authResult.accounts?.length);
+        console.log('Auth token:', authResult.auth_token);
+
+        // Store auth token for reauthorization
+        setAuthToken(authResult.auth_token);
 
         // MWA returns address as base64-encoded string
         // Decode it to Uint8Array, then create PublicKey
@@ -76,15 +81,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const disconnect = useCallback(async () => {
     try {
       await transact(async (wallet) => {
-        await wallet.deauthorize();
+        await wallet.deauthorize({ auth_token: authToken ?? undefined });
       });
     } catch (error) {
       console.error('Failed to disconnect:', error);
     } finally {
       setPublicKey(null);
       setConnected(false);
+      setAuthToken(null);
     }
-  }, []);
+  }, [authToken]);
 
   const signMessage = useCallback(async (message: Uint8Array): Promise<Uint8Array> => {
     if (!publicKey) throw new Error('Wallet not connected');
@@ -93,6 +99,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const authResult = await wallet.authorize({
         cluster: 'devnet',
         identity: APP_IDENTITY,
+        auth_token: authToken ?? undefined,
       });
 
       const signedMessages = await wallet.signMessages({
@@ -102,7 +109,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return signedMessages[0];
     });
-  }, [publicKey]);
+  }, [publicKey, authToken]);
 
   const signTransaction = useCallback(async (
     transaction: Transaction | VersionedTransaction
@@ -110,51 +117,57 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (!publicKey) throw new Error('Wallet not connected');
 
     return await transact(async (wallet) => {
-      const authResult = await wallet.authorize({
+      await wallet.authorize({
         cluster: 'devnet',
         identity: APP_IDENTITY,
+        auth_token: authToken ?? undefined,
       });
 
-      const serialized = transaction.serialize({
-        requireAllSignatures: false,
-        verifySignatures: false,
-      });
-
+      // Pass the transaction object directly to signTransactions
       const signedTxs = await wallet.signTransactions({
-        transactions: [serialized],
+        transactions: [transaction],
       });
 
-      if (transaction instanceof VersionedTransaction) {
-        return VersionedTransaction.deserialize(signedTxs[0]);
-      } else {
-        return Transaction.from(signedTxs[0]);
-      }
+      // wallet.signTransactions returns the signed transactions
+      return signedTxs[0];
     });
-  }, [publicKey]);
+  }, [publicKey, authToken]);
 
   const signAndSendTransaction = useCallback(async (
     transaction: Transaction | VersionedTransaction
   ): Promise<string> => {
+    console.log('signAndSendTransaction called with:', transaction);
+    console.log('Transaction type:', transaction?.constructor?.name);
+
     if (!publicKey) throw new Error('Wallet not connected');
 
+    // CRITICAL: Serialize BEFORE passing to transact() to preserve methods
+    const serialized = transaction instanceof VersionedTransaction
+      ? transaction.serialize()
+      : transaction.serialize({
+          requireAllSignatures: false,
+          verifySignatures: false,
+        });
+
+    console.log('Serialized transaction, length:', serialized.length);
+
     return await transact(async (wallet) => {
-      const authResult = await wallet.authorize({
+      // Silently reauthorize using stored auth token
+      await wallet.authorize({
         cluster: 'devnet',
         identity: APP_IDENTITY,
+        auth_token: authToken ?? undefined,
       });
 
-      const serialized = transaction.serialize({
-        requireAllSignatures: false,
-        verifySignatures: false,
-      });
-
+      console.log('Sending transaction to wallet...');
       const result = await wallet.signAndSendTransactions({
         transactions: [serialized],
       });
 
+      console.log('Transaction result:', result);
       return result.signatures[0];
     });
-  }, [publicKey]);
+  }, [publicKey, authToken]);
 
   const value: WalletContextType = {
     publicKey,

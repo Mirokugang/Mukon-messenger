@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, FlatList, StyleSheet, Alert } from 'react-native';
 import { List, FAB, Searchbar, Avatar, Badge, Text, Button } from 'react-native-paper';
+import { PublicKey } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 import { theme } from '../theme';
-import { truncateAddress } from '../utils/encryption';
+import { truncateAddress, getChatHash } from '../utils/encryption';
 import { useWallet } from '../contexts/WalletContext';
 import { useMukonMessenger } from '../hooks/useMukonMessenger';
 
@@ -54,40 +56,146 @@ export default function ContactsScreen({ navigation }: any) {
     );
   }
 
-  const contacts = messenger.contacts.map((contact, index) => ({
-    id: contact.publicKey.toBase58(),
-    displayName: contact.displayName,
-    pubkey: contact.publicKey.toBase58(),
-    lastMessage: '', // TODO: Get from messages
-    timestamp: '',
-    unread: 0,
-    avatar: contact.avatarUrl,
-  }));
+  const contacts = messenger.contacts.map((contact, index) => {
+    // Calculate conversation ID for this contact
+    const conversationId = wallet.publicKey
+      ? Buffer.from(getChatHash(wallet.publicKey, contact.publicKey)).toString('hex')
+      : '';
 
-  const renderContact = ({ item }: any) => (
-    <List.Item
-      title={item.displayName || truncateAddress(item.pubkey, 4)}
-      description={item.lastMessage}
-      onPress={() => navigation.navigate('Chat', { contact: item })}
-      left={(props) => (
-        <Avatar.Text
-          {...props}
-          size={48}
-          label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
-          style={{ backgroundColor: theme.colors.primary }}
-        />
-      )}
-      right={(props) => (
-        <View style={styles.rightContainer}>
-          <Text style={styles.timestamp}>{item.timestamp}</Text>
-          {item.unread > 0 && (
-            <Badge style={styles.badge}>{item.unread}</Badge>
+    // Get unread count for this conversation
+    const unread = messenger.unreadCounts.get(conversationId) || 0;
+
+    // Get last message from this conversation
+    const conversationMessages = messenger.messages.get(conversationId) || [];
+    const lastMessage = conversationMessages.length > 0
+      ? conversationMessages[conversationMessages.length - 1]
+      : null;
+
+    // Decrypt last message if encrypted
+    let lastMessageText = '';
+    if (lastMessage) {
+      if (lastMessage.encrypted && lastMessage.nonce) {
+        const decrypted = messenger.decryptConversationMessage(
+          lastMessage.encrypted,
+          lastMessage.nonce,
+          contact.publicKey
+        );
+        lastMessageText = decrypted || '[Encrypted]';
+      } else {
+        lastMessageText = lastMessage.content || '';
+      }
+    }
+
+    return {
+      id: contact.publicKey.toBase58(),
+      displayName: contact.displayName,
+      pubkey: contact.publicKey.toBase58(),
+      state: contact.state, // Invited, Requested, Accepted, Rejected
+      lastMessage: lastMessageText,
+      timestamp: lastMessage ? new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      unread,
+      avatar: contact.avatarUrl,
+    };
+  });
+
+  const renderContact = ({ item }: any) => {
+    // Show different UI based on peer state
+    if (item.state === 'Requested') {
+      // They invited you - show Accept/Decline buttons
+      return (
+        <List.Item
+          title={item.displayName || truncateAddress(item.pubkey, 4)}
+          description="Wants to connect with you"
+          left={(props) => (
+            <Avatar.Text
+              {...props}
+              size={48}
+              label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+              style={{ backgroundColor: theme.colors.accent }}
+            />
           )}
-        </View>
-      )}
-      style={styles.contactItem}
-    />
-  );
+          right={() => (
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Button
+                mode="contained"
+                onPress={async () => {
+                  try {
+                    await messenger.acceptInvitation(new PublicKey(item.pubkey));
+                    Alert.alert('Success', 'Invitation accepted!');
+                  } catch (error: any) {
+                    Alert.alert('Error', error.message);
+                  }
+                }}
+                style={{ backgroundColor: theme.colors.secondary }}
+              >
+                Accept
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={async () => {
+                  try {
+                    await messenger.rejectInvitation(new PublicKey(item.pubkey));
+                    Alert.alert('Declined', 'Invitation declined');
+                  } catch (error: any) {
+                    Alert.alert('Error', error.message);
+                  }
+                }}
+              >
+                Decline
+              </Button>
+            </View>
+          )}
+          style={styles.contactItem}
+        />
+      );
+    }
+
+    if (item.state === 'Invited') {
+      // You invited them - show pending
+      return (
+        <List.Item
+          title={item.displayName || truncateAddress(item.pubkey, 4)}
+          description="Invitation pending..."
+          left={(props) => (
+            <Avatar.Text
+              {...props}
+              size={48}
+              label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+              style={{ backgroundColor: theme.colors.textSecondary }}
+            />
+          )}
+          right={() => <Text style={{ color: theme.colors.textSecondary }}>Pending</Text>}
+          style={styles.contactItem}
+        />
+      );
+    }
+
+    // Accepted - normal contact
+    return (
+      <List.Item
+        title={item.displayName || truncateAddress(item.pubkey, 4)}
+        description={item.lastMessage}
+        onPress={() => navigation.navigate('Chat', { contact: item })}
+        left={(props) => (
+          <Avatar.Text
+            {...props}
+            size={48}
+            label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+            style={{ backgroundColor: theme.colors.primary }}
+          />
+        )}
+        right={(props) => (
+          <View style={styles.rightContainer}>
+            <Text style={styles.timestamp}>{item.timestamp}</Text>
+            {item.unread > 0 && (
+              <Badge style={styles.badge}>{item.unread}</Badge>
+            )}
+          </View>
+        )}
+        style={styles.contactItem}
+      />
+    );
+  };
 
   return (
     <View style={styles.container}>

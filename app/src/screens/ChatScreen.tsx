@@ -1,29 +1,61 @@
 import React from 'react';
 import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { TextInput, IconButton, Text, Avatar } from 'react-native-paper';
+import { PublicKey } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 import { theme } from '../theme';
+import { useWallet } from '../contexts/WalletContext';
+import { useMukonMessenger } from '../hooks/useMukonMessenger';
+import { getChatHash } from '../utils/encryption';
 
 export default function ChatScreen({ route, navigation }: any) {
   const { contact } = route.params;
   const [message, setMessage] = React.useState('');
+  const wallet = useWallet();
+  const messenger = useMukonMessenger(wallet, 'devnet');
 
-  // Mock messages - replace with actual messages from useMukonMessenger
-  const messages = [
-    {
-      id: '1',
-      sender: contact.pubkey,
-      content: 'Hey, you free to chat?',
-      timestamp: new Date(Date.now() - 120000),
-      isMe: false,
-    },
-    {
-      id: '2',
-      sender: 'me',
-      content: "Yeah what's up?",
-      timestamp: new Date(Date.now() - 60000),
-      isMe: true,
-    },
-  ];
+  // Get conversation ID from the two public keys
+  const conversationId = React.useMemo(() => {
+    if (!wallet.publicKey) return '';
+    const chatHash = getChatHash(wallet.publicKey, new PublicKey(contact.pubkey));
+    return Buffer.from(chatHash).toString('hex');
+  }, [wallet.publicKey, contact.pubkey]);
+
+  // Join conversation room when screen mounts
+  React.useEffect(() => {
+    if (conversationId && messenger.socket) {
+      messenger.joinConversation(conversationId);
+
+      return () => {
+        messenger.leaveConversation(conversationId);
+      };
+    }
+  }, [conversationId, messenger.socket]);
+
+  // Get messages for this conversation
+  const conversationMessages = messenger.messages.get(conversationId) || [];
+
+  const messages = conversationMessages.map((msg: any, idx: number) => {
+    let content = msg.content;
+
+    // Decrypt if message is encrypted
+    if (msg.encrypted && msg.nonce) {
+      const decrypted = messenger.decryptConversationMessage(
+        msg.encrypted,
+        msg.nonce,
+        new PublicKey(contact.pubkey)
+      );
+      content = decrypted || '[Unable to decrypt]';
+    }
+
+    return {
+      id: `${idx}`,
+      sender: msg.sender,
+      content,
+      timestamp: new Date(msg.timestamp || Date.now()),
+      isMe: msg.sender === wallet.publicKey?.toBase58(),
+    };
+  });
 
   React.useLayoutEffect(() => {
     navigation.setOptions({
@@ -44,11 +76,19 @@ export default function ChatScreen({ route, navigation }: any) {
     });
   }, [navigation, contact]);
 
-  const sendMessage = () => {
-    if (!message.trim()) return;
-    // TODO: Use useMukonMessenger hook to send encrypted message
-    console.log('Sending message:', message);
-    setMessage('');
+  const sendMessage = async () => {
+    if (!message.trim() || !wallet.publicKey) return;
+
+    try {
+      await messenger.sendMessage(
+        conversationId,
+        message.trim(),
+        new PublicKey(contact.pubkey)
+      );
+      setMessage('');
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    }
   };
 
   const renderMessage = ({ item }: any) => (

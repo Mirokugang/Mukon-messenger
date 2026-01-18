@@ -127,7 +127,7 @@ io.on('connection', (socket) => {
     console.log(`${socket.publicKey} left conversation: ${conversationId}`);
   });
 
-  socket.on('send_message', ({ conversationId, encrypted, nonce }) => {
+  socket.on('send_message', ({ conversationId, content, encrypted, nonce, sender, timestamp }) => {
     if (!socket.publicKey) {
       socket.emit('error', { message: 'Not authenticated' });
       return;
@@ -135,11 +135,23 @@ io.on('connection', (socket) => {
 
     const messageData = {
       id: Date.now().toString(),
-      sender: socket.publicKey,
-      encrypted,
-      nonce,
-      timestamp: Date.now()
+      conversationId, // Include conversationId so client knows where to add it
+      sender: sender || socket.publicKey,
+      timestamp: timestamp || Date.now()
     };
+
+    // Handle both encrypted and plain text messages
+    if (encrypted && nonce) {
+      messageData.encrypted = encrypted;
+      messageData.nonce = nonce;
+      console.log(`Encrypted message sent in ${conversationId}`);
+    } else if (content) {
+      messageData.content = content;
+      console.log(`Plain text message sent in ${conversationId}:`, content);
+    } else {
+      socket.emit('error', { message: 'Message must have either content or encrypted data' });
+      return;
+    }
 
     // Store message
     if (!messages.has(conversationId)) {
@@ -147,7 +159,7 @@ io.on('connection', (socket) => {
     }
     messages.get(conversationId).push(messageData);
 
-    // Broadcast to conversation
+    // Broadcast to conversation (including sender for confirmation)
     io.to(conversationId).emit('new_message', messageData);
   });
 

@@ -162,16 +162,15 @@ export function createRejectInstruction(
 }
 
 /**
- * Create and send a transaction (following EncryptSim pattern)
+ * Build a VersionedTransaction from instructions
  */
-export async function buildAndSendTransaction(
+export async function buildTransaction(
   connection: Connection,
   payer: PublicKey,
-  instructions: TransactionInstruction[],
-  signTransaction: (tx: VersionedTransaction) => Promise<VersionedTransaction>
-): Promise<string> {
+  instructions: TransactionInstruction[]
+): Promise<VersionedTransaction> {
   // Get latest blockhash
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
 
   // Build v0 transaction message
   const message = new TransactionMessage({
@@ -181,30 +180,5 @@ export async function buildAndSendTransaction(
   }).compileToV0Message();
 
   // Create versioned transaction
-  const transaction = new VersionedTransaction(message);
-
-  // Sign with wallet
-  const signedTransaction = await signTransaction(transaction);
-
-  // Send raw transaction
-  const signature = await connection.sendRawTransaction(
-    signedTransaction.serialize(),
-    {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-      maxRetries: 3,
-    }
-  );
-
-  // Confirm transaction
-  await connection.confirmTransaction(
-    {
-      signature,
-      blockhash,
-      lastValidBlockHeight,
-    },
-    'confirmed'
-  );
-
-  return signature;
+  return new VersionedTransaction(message);
 }
