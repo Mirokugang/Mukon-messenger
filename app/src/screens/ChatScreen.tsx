@@ -35,27 +35,13 @@ export default function ChatScreen({ route, navigation }: any) {
   // Get messages for this conversation
   const conversationMessages = messenger.messages.get(conversationId) || [];
 
-  const messages = conversationMessages.map((msg: any, idx: number) => {
-    let content = msg.content;
-
-    // Decrypt if message is encrypted
-    if (msg.encrypted && msg.nonce) {
-      const decrypted = messenger.decryptConversationMessage(
-        msg.encrypted,
-        msg.nonce,
-        new PublicKey(contact.pubkey)
-      );
-      content = decrypted || '[Unable to decrypt]';
-    }
-
-    return {
-      id: `${idx}`,
-      sender: msg.sender,
-      content,
-      timestamp: new Date(msg.timestamp || Date.now()),
-      isMe: msg.sender === wallet.publicKey?.toBase58(),
-    };
-  });
+  const messages = conversationMessages.map((msg: any, idx: number) => ({
+    id: msg.id || `${idx}`,
+    sender: msg.sender,
+    content: msg.content || '[No content]',
+    timestamp: new Date(msg.timestamp || Date.now()),
+    isMe: msg.sender === wallet.publicKey?.toBase58(),
+  }));
 
   React.useLayoutEffect(() => {
     navigation.setOptions({

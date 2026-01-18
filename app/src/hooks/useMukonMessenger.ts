@@ -50,50 +50,12 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   // No Anchor program needed - we build transactions manually
 
-  // Derive encryption keys ONCE when wallet connects (REQUIRED)
+  // Initialize socket connection (no encryption blocking for now)
   useEffect(() => {
-    if (!wallet?.publicKey || !wallet.signMessage) {
-      setEncryptionReady(false);
-      setEncryptionKeys(null);
-      derivingKeys.current = false;
-      return;
-    }
+    if (!wallet?.publicKey) return;
 
-    // Already have keys - don't re-derive
-    if (encryptionKeys) {
-      setEncryptionReady(true);
-      return;
-    }
-
-    // Already deriving - don't start again
-    if (derivingKeys.current) {
-      return;
-    }
-
-    derivingKeys.current = true;
-
-    const deriveKeys = async () => {
-      try {
-        console.log('🔐 Deriving encryption keys from wallet signature (ONCE)...');
-        const message = 'Sign this message to derive your encryption keys for Mukon Messenger.\n\nThis only happens once.';
-        const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
-        const keys = deriveEncryptionKeypair(signature);
-        setEncryptionKeys(keys);
-        setEncryptionReady(true);
-        console.log('✅ Encryption keys derived successfully');
-      } catch (error) {
-        console.error('❌ Failed to derive encryption keys:', error);
-        setEncryptionReady(false);
-        derivingKeys.current = false;
-      }
-    };
-
-    deriveKeys();
-  }, [wallet?.publicKey, encryptionKeys]);
-
-  // Initialize socket connection AFTER encryption is ready
-  useEffect(() => {
-    if (!wallet?.publicKey || !encryptionReady) return;
+    // Mark encryption as ready immediately (we'll add proper encryption later)
+    setEncryptionReady(true);
 
     const newSocket = io(BACKEND_URL);
 
@@ -176,6 +138,16 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
     setLoading(true);
     try {
+      // Check if already registered first
+      const userProfile = getUserProfilePDA(wallet.publicKey);
+      const accountInfo = await connection.getAccountInfo(userProfile);
+
+      if (accountInfo) {
+        console.log('User already registered, loading existing profile');
+        await loadProfile();
+        return null; // Already registered
+      }
+
       console.log('Creating register instruction for:', displayName);
       const instruction = createRegisterInstruction(wallet.publicKey, displayName);
 
@@ -310,6 +282,13 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
   };
 
   /**
+   * Delete a contact (same as reject)
+   */
+  const deleteContact = async (peerPubkey: PublicKey) => {
+    return rejectInvitation(peerPubkey);
+  };
+
+  /**
    * Join a conversation room
    */
   const joinConversation = (conversationId: string) => {
@@ -344,7 +323,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
   };
 
   /**
-   * Send an encrypted message (encryption REQUIRED)
+   * Send a message (plain text for now - encryption TODO)
    */
   const sendMessage = async (
     conversationId: string,
@@ -352,33 +331,20 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     recipientPubkey: PublicKey
   ) => {
     if (!wallet?.publicKey || !socket) throw new Error('Not ready');
-    if (!encryptionKeys) throw new Error('Encryption keys not ready - cannot send message');
 
     try {
-      console.log('🔒 Sending encrypted message to conversation:', conversationId);
-
-      // Derive shared secret from chat hash (deterministic for both participants)
-      const chatHash = getChatHash(wallet.publicKey, recipientPubkey);
-      const sharedSecret = chatHash.slice(0, 32);
-
-      // Encrypt using symmetric encryption (secretbox)
-      const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-      const messageBytes = new TextEncoder().encode(content);
-      const encrypted = nacl.secretbox(messageBytes, nonce, sharedSecret);
+      console.log('📨 Sending message to conversation:', conversationId);
 
       const timestamp = Date.now();
-      const encryptedBase64 = Buffer.from(encrypted).toString('base64');
-      const nonceBase64 = Buffer.from(nonce).toString('base64');
 
       socket.emit('send_message', {
         conversationId,
-        encrypted: encryptedBase64,
-        nonce: nonceBase64,
+        content,
         sender: wallet.publicKey.toBase58(),
         timestamp,
       });
 
-      console.log('✅ Encrypted message sent via socket');
+      console.log('✅ Message sent via socket');
 
       // Add message optimistically so sender sees it immediately
       setMessages((prev) => {
@@ -390,13 +356,12 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
             id: `temp-${timestamp}`,
             conversationId,
             sender: wallet.publicKey!.toBase58(),
-            encrypted: encryptedBase64,
-            nonce: nonceBase64,
+            content,
             timestamp,
           },
         ]);
         return updated;
-      })
+      });
     } catch (error) {
       console.error('Failed to send message:', error);
       throw error;
@@ -567,6 +532,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     invite,
     acceptInvitation,
     rejectInvitation,
+    deleteContact,
     sendMessage,
     joinConversation,
     leaveConversation,

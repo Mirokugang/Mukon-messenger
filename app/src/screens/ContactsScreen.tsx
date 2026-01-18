@@ -71,20 +71,7 @@ export default function ContactsScreen({ navigation }: any) {
       ? conversationMessages[conversationMessages.length - 1]
       : null;
 
-    // Decrypt last message if encrypted
-    let lastMessageText = '';
-    if (lastMessage) {
-      if (lastMessage.encrypted && lastMessage.nonce) {
-        const decrypted = messenger.decryptConversationMessage(
-          lastMessage.encrypted,
-          lastMessage.nonce,
-          contact.publicKey
-        );
-        lastMessageText = decrypted || '[Encrypted]';
-      } else {
-        lastMessageText = lastMessage.content || '';
-      }
-    }
+    const lastMessageText = lastMessage?.content || '';
 
     return {
       id: contact.publicKey.toBase58(),
