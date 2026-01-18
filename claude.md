@@ -8,11 +8,48 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 
 ## Development Guidelines
 
-**IMPORTANT - Dev Servers:**
+**IMPORTANT - Dev Servers & Builds:**
 - NEVER run dev servers (npx expo start, npm run dev, etc.) - only the user should run these
+- NEVER run builds (npx expo run:android) - only the user should build and install via ADB
 - User needs to see device logs directly, which are not visible to Claude
-- Only run builds (npx expo run:android) when explicitly requested
-- All other testing/debugging should be done by the user running their own dev servers
+- All testing/debugging should be done by the user running their own dev servers and builds
+
+## Current Status (as of 2026-01-17)
+
+**What's Deployed:**
+- Solana program deployed to devnet: `89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr`
+- Program includes Arcium encryption for contact lists (on-chain encryption working)
+- Backend WebSocket server running on localhost:3001
+
+**What's Working:**
+- React Native app structure complete
+- Wallet connection via Solana Mobile Wallet Adapter (MWA) working
+- Base64 address decoding from MWA working
+- Wallet connects successfully: `3uBhqxZT3oCY9F9127YvU3XeoZC4ouB2yCzf3HdgXzLr`
+- All polyfills in place (Buffer, structuredClone, TextEncoder/TextDecoder)
+
+**What's NOT Working:**
+- Anchor SDK still trying to initialize despite removing imports from useMukonMessenger.ts
+- App shows initialization errors related to Anchor/React Native compatibility
+- Manual transaction construction implemented but not tested yet
+
+**Implementation Details:**
+- Created `/app/src/utils/transactions.ts` with manual instruction builders:
+  - `createRegisterInstruction()` - Manual transaction for registration
+  - `createInviteInstruction()` - Manual transaction for invitations
+  - `createAcceptInstruction()` - Manual transaction for accepting contacts
+  - `createRejectInstruction()` - Manual transaction for rejecting contacts
+  - `buildAndSendTransaction()` - Builds VersionedTransaction and sends via connection
+- Updated `useMukonMessenger.ts` to use manual transactions instead of Anchor Program
+- Removed Anchor Program initialization code
+- BUT: Anchor package still in package.json and being imported somewhere
+
+**Next Steps:**
+1. Find and remove ALL remaining Anchor imports/initialization
+2. Verify @coral-xyz/anchor is completely removed from the build
+3. Test registration transaction on-chain
+4. Test invite/accept flow
+5. Implement account deserialization for loadProfile/loadContacts (optional)
 
 ## What We're Building
 
