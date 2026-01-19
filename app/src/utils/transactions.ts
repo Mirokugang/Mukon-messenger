@@ -8,7 +8,7 @@ import {
 } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 
-const PROGRAM_ID = new PublicKey('89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr');
+const PROGRAM_ID = new PublicKey('DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv');
 
 // Instruction discriminators from IDL
 const DISCRIMINATORS = {

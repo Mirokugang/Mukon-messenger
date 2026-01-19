@@ -605,34 +605,6 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
       console.log('Profile loaded:', { displayName, avatarUrl, encryptionPublicKey: Buffer.from(encryptionPublicKey).toString('hex') });
 
-      // Check if encryption key is all zeros (user registered before encryption was added)
-      const isKeyEmpty = Buffer.from(encryptionPublicKey).every(byte => byte === 0);
-
-      if (isKeyEmpty && encryptionKeys) {
-        // Update profile with the derived encryption key
-        console.log('🔑 Encryption key is missing, updating profile...');
-        try {
-          const { createUpdateProfileInstruction, buildTransaction } = await import('../utils/transactions');
-          const instruction = createUpdateProfileInstruction(
-            wallet.publicKey,
-            null,  // Don't change display name
-            null,  // Don't change avatar
-            encryptionKeys.publicKey
-          );
-          const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
-          const signedTransaction = await wallet.signTransaction(transaction);
-          const signature = await connection.sendTransaction(signedTransaction);
-          await connection.confirmTransaction(signature, 'confirmed');
-          console.log('✅ Encryption key updated on-chain');
-
-          // Reload profile to get updated key
-          await loadProfile();
-          return;
-        } catch (error) {
-          console.error('❌ Failed to update encryption key:', error);
-        }
-      }
-
       setProfile({
         displayName: displayName || wallet.publicKey.toBase58().slice(0, 8) + '...',
         avatarUrl: avatarUrl || null,

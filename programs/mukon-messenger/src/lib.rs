@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use sha2::{Digest, Sha256};
 use arcium_anchor::prelude::*;
 
-declare_id!("89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr");
+declare_id!("DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv");
 
 #[error_code]
 pub enum ErrorCode {

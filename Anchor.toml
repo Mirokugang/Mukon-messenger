@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-mukon_messenger = "89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr"
+mukon_messenger = "DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv"
 
 [programs.devnet]
-mukon_messenger = "89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr"
+mukon_messenger = "DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv"
 
 [registry]
 url = "https://api.apr.dev"

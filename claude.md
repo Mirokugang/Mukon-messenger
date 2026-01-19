@@ -563,6 +563,49 @@ git clone https://github.com/cherrydotfun/stem-proto.git ../stem-proto-reference
 3. **Arcium testnet**: Need to get cluster offset for devnet deployment
 4. **Scope**: 1:1 only for MVP, groups post-hackathon
 
+## Current Status (Jan 19, 2026)
+
+### ✅ FRESH START - New Program Deployed
+
+**NEW Program ID:** `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
+
+**What Changed:**
+- Deployed COMPLETELY NEW program (not an upgrade)
+- All old accounts (contacts, profiles) are wiped - clean slate
+- No more hacky auto-update code
+- Encryption keys built-in from the start
+
+### What's Working
+- ✅ New Solana program on devnet with proper encryption from day 1
+- ✅ Program includes: register (with encryption key), invite, accept, reject, update_profile
+- ✅ Backend running on localhost:3001 (WebSocket for messages)
+- ✅ React Native app with Mobile Wallet Adapter integration
+- ✅ Manual transaction construction (no Anchor SDK in app)
+- ✅ Contact management UI with delete button
+- ✅ Deterministic encryption keypair derivation from wallet signature
+- ✅ NaCl box (asymmetric) encryption for messages
+- ✅ Message decryption logic: only decrypts incoming messages, not own sent messages
+
+### Architecture Decisions
+- **New program = fresh start**: Generated new keypair, no old accounts carry over
+- **Encryption keys are deterministic**: Same wallet signature = same keypair forever
+- **Public keys stored on-chain**: In UserProfile during registration
+- **Asymmetric encryption**: NaCl box (not secretbox) for peer-to-peer messaging
+- **Messages stored off-chain**: Backend holds encrypted message blobs, only metadata on-chain
+
+### Testing Flow (BOTH WALLETS MUST RE-REGISTER)
+1. **Restart metro** with cache clear: `npm start -- --reset-cache`
+2. **Both wallets register** - encryption keys will be generated and stored properly
+3. **Add contacts** - both users send/accept invitations
+4. **Send encrypted messages** - should work cleanly now
+
+### Expected Behavior
+- ✅ Register once per wallet (sign message to derive encryption keys)
+- ✅ No constant wallet verification prompts
+- ✅ Encrypted messages send/receive properly
+- ✅ Can see own sent messages in plaintext
+- ✅ Can decrypt received messages from peers
+
 ## Git Commit Guidelines
 
 **IMPORTANT:** Do not include Claude credits in commit messages. Keep commits professional and attribution-free.
