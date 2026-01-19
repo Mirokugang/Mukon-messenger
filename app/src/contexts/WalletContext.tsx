@@ -65,11 +65,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const pubkey = new PublicKey(publicKeyBytes);
         console.log('PublicKey created successfully:', pubkey.toBase58());
 
-        setPublicKey(pubkey);
-        setConnected(true);
-        console.log('Wallet connected:', pubkey.toBase58());
-
-        // CRITICAL: Derive encryption keys IN THE SAME transact() session
+        // CRITICAL: Get encryption signature BEFORE setting connected state
         console.log('🔐 Deriving encryption keypair (in same session)...');
         const message = Buffer.from('Sign this message to derive your encryption keys for Mukon Messenger', 'utf8');
         const signedMessages = await wallet.signMessages({
@@ -77,11 +73,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           payloads: [message],
         });
         console.log('✅ Encryption signature obtained');
+
+        // Store signature FIRST before triggering state changes
+        (window as any).__mukonEncryptionSignature = signedMessages[0];
+
+        // NOW set state (this will trigger useEffects with signature already available)
+        setPublicKey(pubkey);
+        setConnected(true);
+        console.log('Wallet connected:', pubkey.toBase58());
+
         return signedMessages[0];
       });
 
-      // Store encryption signature for useMukonMessenger to use
-      (window as any).__mukonEncryptionSignature = encryptionSignature;
+      // Signature already stored inside transact() before state changes
+      console.log('Encryption signature ready for use');
     } catch (error) {
       console.error('Failed to connect wallet:', error);
       console.error('Error stack:', error.stack);
