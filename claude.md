@@ -650,6 +650,8 @@ if invitee_descriptor.owner == Pubkey::default() {
 
 **IMPORTANT:** Do not include Claude credits in commit messages. Keep commits professional and attribution-free.
 
+**IMPORTANT:** Solo dev workflow - only push to remote at END of session. Commit frequently locally, but don't waste tokens pushing to remote after every commit.
+
 ## Project Assets
 
 - `logo.jpg` - Project logo (already in repository)

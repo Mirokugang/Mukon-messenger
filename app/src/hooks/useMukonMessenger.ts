@@ -57,11 +57,14 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     // Mark encryption as ready immediately (we'll add proper encryption later)
     setEncryptionReady(true);
 
+    console.log('🔌 Connecting to backend:', BACKEND_URL);
+
     const newSocket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'], // Try polling first
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       timeout: 10000,
+      forceNew: true,
     });
 
     newSocket.on('connect', async () => {
