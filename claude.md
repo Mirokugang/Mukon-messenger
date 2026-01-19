@@ -14,42 +14,64 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 - User needs to see device logs directly, which are not visible to Claude
 - All testing/debugging should be done by the user running their own dev servers and builds
 
-## Current Status (as of 2026-01-17)
+## Current Status (as of 2026-01-20)
+
+### ✅ MVP COMPLETE - Working E2E Encrypted Messenger!
 
 **What's Deployed:**
-- Solana program deployed to devnet: `89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr`
-- Program includes Arcium encryption for contact lists (on-chain encryption working)
-- Backend WebSocket server running on localhost:3001
+- NEW Solana program on devnet: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
+- Program includes: register (with encryption key), invite, accept, reject, update_profile
+- Backend WebSocket server running on 192.168.1.33:3001 (host IP for physical device)
 
 **What's Working:**
-- React Native app structure complete
-- Wallet connection via Solana Mobile Wallet Adapter (MWA) working
-- Base64 address decoding from MWA working
-- Wallet connects successfully: `3uBhqxZT3oCY9F9127YvU3XeoZC4ouB2yCzf3HdgXzLr`
-- All polyfills in place (Buffer, structuredClone, TextEncoder/TextDecoder)
+- ✅ Solana Mobile Wallet Adapter (MWA) integration
+- ✅ Manual transaction construction (no Anchor SDK in app - React Native compatible!)
+- ✅ User registration with encryption public key stored on-chain
+- ✅ Contact invitation/accept/reject flow
+- ✅ E2E encrypted messaging using NaCl box (asymmetric encryption)
+- ✅ Messages encrypted with recipient's public key + sender's secret key
+- ✅ Backend only sees encrypted blobs (true E2E encryption)
+- ✅ Message persistence: Messages load from backend on chat screen mount
+- ✅ Real-time message delivery via Socket.IO
+- ✅ One-time encryption key derivation in same MWA session as wallet connect
+- ✅ Duplicate message detection (matches by encrypted+nonce+sender)
+- ✅ Decryption of both incoming and own messages from backend history
+- ✅ **NEW: MessengerContext architecture** - ONE socket instance, shared encryption keys, centralized state
 
-**What's NOT Working:**
-- Anchor SDK still trying to initialize despite removing imports from useMukonMessenger.ts
-- App shows initialization errors related to Anchor/React Native compatibility
-- Manual transaction construction implemented but not tested yet
+**Recent Major Refactor (Jan 20):**
+- Created `MessengerContext` to centralize socket/encryption/state management
+- Eliminates multiple socket instances (one per screen → ONE for entire app)
+- Eliminates duplicate authentications and wallet prompts
+- Shared encryption keys across all components
+- Centralized message state with proper deduplication
+- Fixed critical decryption bug: ChatScreen now correctly determines recipient for incoming vs outgoing messages
 
-**Implementation Details:**
-- Created `/app/src/utils/transactions.ts` with manual instruction builders:
-  - `createRegisterInstruction()` - Manual transaction for registration
-  - `createInviteInstruction()` - Manual transaction for invitations
-  - `createAcceptInstruction()` - Manual transaction for accepting contacts
-  - `createRejectInstruction()` - Manual transaction for rejecting contacts
-  - `buildAndSendTransaction()` - Builds VersionedTransaction and sends via connection
-- Updated `useMukonMessenger.ts` to use manual transactions instead of Anchor Program
-- Removed Anchor Program initialization code
-- BUT: Anchor package still in package.json and being imported somewhere
+**Architecture:**
+- `app/src/contexts/MessengerContext.tsx` - Centralized messenger logic (socket, encryption, state)
+- `app/src/contexts/WalletContext.tsx` - Wallet connection via MWA
+- `app/src/utils/transactions.ts` - Manual transaction builders (no Anchor SDK)
+- `app/src/utils/encryption.ts` - NaCl encryption utilities
+- All screens now use `useMessenger()` hook from MessengerContext
+
+**Testing Flow:**
+1. Connect wallet (derives encryption keys once)
+2. Register user (stores encryption public key on-chain)
+3. Add contacts (send/accept invitations)
+4. Send encrypted messages (E2E encrypted, backend only sees blobs)
+5. Both users can decrypt messages using conversation partner's encryption public key
+
+**Known Issues to Fix (Priority Order):**
+1. **Too many wallet verification prompts** - ✅ FIXED with MessengerContext (Jan 20)
+2. **Second wallet decryption problems** - ✅ FIXED with correct recipient determination (Jan 20)
+3. **No wallet connection persistence** - Closing/reopening app requires full reconnect (TODO)
+4. Backend only stores messages in memory - Need SQLite/Redis for persistence (TODO)
 
 **Next Steps:**
-1. Find and remove ALL remaining Anchor imports/initialization
-2. Verify @coral-xyz/anchor is completely removed from the build
-3. Test registration transaction on-chain
-4. Test invite/accept flow
-5. Implement account deserialization for loadProfile/loadContacts (optional)
+1. Test MessengerContext refactor thoroughly
+2. Add wallet connection persistence (AsyncStorage)
+3. Add backend message persistence (SQLite or Redis)
+4. Polish UI/UX (chat bubbles, timestamps, scroll behavior)
+5. Add .sol/.skr domain name resolution for contacts
 
 ## What We're Building
 
@@ -733,64 +755,70 @@ if invitee_descriptor.owner == Pubkey::default() {
 
 **Why This Matters:** Users can share their wallet address and invite friends immediately. When friends register, invitations are already waiting. This matches web2 UX expectations.
 
-## CURRENT CRITICAL ISSUES (Jan 19, 2026 - Late Session)
+## RECENT FIXES (Jan 20, 2026)
 
-### Issue 1: Socket.io Connection Failing ⚠️ **ACTIVELY DEBUGGING**
+### ✅ FIXED: Multiple Socket Instances & Constant Auth Prompts
 
-**Problem:** Socket.io client on physical device cannot connect to backend server.
-- Backend running at `0.0.0.0:3001` on Mac
-- Client trying to connect to `http://10.0.2.2:3001` (WRONG - this is emulator address!)
-- Physical device needs actual host IP: `192.168.1.33:3001`
-- Error: `❌ Socket connection error: timeout`
-- HTTP fetch test never completes - basic connectivity failing
-- Backend shows zero connection attempts in logs
+**Problem (Jan 19):**
+- Each screen (ContactsScreen, ChatScreen, AddContactScreen) created its own socket instance
+- Multiple `useMukonMessenger` instances = multiple authentications
+- User prompted to sign wallet message on every screen navigation
+- Made app unusable
 
-**Root Cause:** Using emulator address `10.0.2.2` instead of actual host machine IP for physical device.
+**Solution (Jan 20):**
+- Created `MessengerContext` to centralize socket/encryption/state
+- ONE socket instance for entire app (created in context provider)
+- ONE authentication on wallet connect
+- Shared encryption keys across all components
+- All screens now use `useMessenger()` hook from context
 
-**What We've Tried:**
-1. ✅ Backend listening on `0.0.0.0:3001` (all interfaces)
-2. ✅ Changed socket.io transport order to `['polling', 'websocket']`
-3. ✅ Disabled WebSocket upgrade
-4. ✅ Added connection error logging
-5. ❌ Still using wrong address for physical device
+**Files Changed:**
+- Created: `app/src/contexts/MessengerContext.tsx`
+- Updated: `app/App.tsx` (wrapped navigator with MessengerProvider)
+- Updated: `app/src/screens/ChatScreen.tsx`, `ContactsScreen.tsx`, `AddContactScreen.tsx`
 
-**Next Steps:**
-1. Change `BACKEND_URL` from `http://10.0.2.2:3001` to `http://192.168.1.33:3001`
-2. Check macOS firewall isn't blocking port 3001
-3. Test if messages persist and broadcast properly once connected
+### ✅ FIXED: Second Wallet Decryption Failure
 
-**Files to Fix:**
-- `app/src/hooks/useMukonMessenger.ts` line 20 - Change BACKEND_URL constant
+**Problem (Jan 19):**
+- Second wallet sent messages but couldn't decrypt them
+- Messages disappeared when leaving/re-entering chat
+- Backend loaded 3 messages but 4 were sent (missing messages)
 
-### Issue 2: Constant Wallet Authorization Prompts ⚠️ **TODO AFTER SOCKET FIX**
+**Root Cause:**
+ChatScreen always used `contact.pubkey` as recipient when decrypting, even for incoming messages:
+```typescript
+// WRONG - always uses contact as recipient
+const recipientPubkey = new PublicKey(contact.pubkey);
+```
 
-**Problem:** User gets wallet signature prompts on every screen navigation.
-- Logs show `"Starting wallet authorization..."` constantly
-- `🔐 Re-deriving encryption keypair from wallet...` on every screen
-- Makes app completely unusable
+**Solution (Jan 20):**
+Correctly determine recipient based on who sent the message:
+```typescript
+// CORRECT - recipient is the OTHER person in conversation
+const recipientPubkey = isMe
+  ? new PublicKey(contact.pubkey)  // You sent it → recipient is contact
+  : wallet.publicKey!;              // They sent it → recipient is you
+```
 
-**Root Cause:** Wallet context remounting frequently, probably due to:
-- Navigation triggering wallet provider re-init
-- useEffect dependencies causing re-renders
-- Socket useEffect depends on `encryptionReady` which triggers loops
+**Result:** Both wallets can now decrypt all messages correctly!
 
-**Needs Investigation:**
-- How wallet provider is set up in navigation structure
-- Why wallet context isn't persisting across screens
-- May need to restructure context providers at app root
+### ✅ FIXED: Backend URL for Physical Device
 
-**Priority:** Fix AFTER socket connection works
+**Problem:** App was using emulator address `http://10.0.2.2:3001` which doesn't work for physical device over ADB/WiFi.
 
-### Current Message Flow (When Socket Connects):
+**Solution:** Changed to actual host machine IP: `http://192.168.1.33:3001` in MessengerContext.
+
+### Current Message Flow (Working as of Jan 20):
 
 1. User types message in ChatScreen
 2. `sendMessage()` encrypts with NaCl box using recipient's public key
 3. Socket emits `send_message` with encrypted payload
 4. Backend receives and broadcasts to conversation room
 5. Recipient's socket receives `new_message` event
-6. Message decrypted and displayed
+6. Message decrypted with correct recipient key and displayed
+7. Both sender and recipient can view message history (properly encrypted/decrypted)
 
-**What's Broken:** Step 3 - socket never connects, so nothing gets sent.
+**Status:** ✅ E2E encrypted messaging working end-to-end!
 
 ## Git Commit Guidelines
 
