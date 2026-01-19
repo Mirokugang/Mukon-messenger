@@ -97,6 +97,12 @@ pub mod mukon_messenger {
         let inviter_descriptor = &mut ctx.accounts.payer_descriptor;
         let invitee_descriptor = &mut ctx.accounts.invitee_descriptor;
 
+        // Initialize invitee_descriptor if it's a new account
+        if invitee_descriptor.owner == Pubkey::default() {
+            invitee_descriptor.owner = invitee.key();
+            invitee_descriptor.peers = vec![];
+        }
+
         require!(
             inviter_descriptor.peers.iter().all(|p| p.wallet != invitee.key()),
             ErrorCode::AlreadyInvited
@@ -300,12 +306,11 @@ pub struct Invite<'info> {
     )]
     pub payer_descriptor: Account<'info, WalletDescriptor>,
     #[account(
-        mut,
+        init_if_needed,
+        payer = payer,
+        space = 8 + 32 + 4 + 100 * (32 + 1),  // Space for ~100 contacts
         seeds = [b"wallet_descriptor", invitee.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
-        bump,
-        realloc = 8 + 32 + 4 + (invitee_descriptor.peers.len() + 1) * (32 + 1),
-        realloc::payer = payer,
-        realloc::zero = true
+        bump
     )]
     pub invitee_descriptor: Account<'info, WalletDescriptor>,
     #[account(

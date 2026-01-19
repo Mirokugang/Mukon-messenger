@@ -606,6 +606,38 @@ git clone https://github.com/cherrydotfun/stem-proto.git ../stem-proto-reference
 - ✅ Can see own sent messages in plaintext
 - ✅ Can decrypt received messages from peers
 
+### CRITICAL UX FEATURE: Invite Unregistered Users
+
+**Problem:** Every social app needs to let users invite friends who haven't joined yet. Requiring both users to register first is terrible UX.
+
+**Solution:** The `invite` instruction uses `init_if_needed` on `invitee_descriptor`:
+- If invitee hasn't registered: Creates their WalletDescriptor with the invitation waiting
+- If invitee has registered: Adds to their existing WalletDescriptor
+- When invitee registers later, they see pending invitations and can accept/reject
+
+**Implementation (programs/mukon-messenger/src/lib.rs lines 302-309):**
+```rust
+#[account(
+    init_if_needed,
+    payer = payer,
+    space = 8 + 32 + 4 + 100 * (32 + 1),  // Space for ~100 contacts
+    seeds = [b"wallet_descriptor", invitee.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
+    bump
+)]
+pub invitee_descriptor: Account<'info, WalletDescriptor>,
+```
+
+And initialization logic (lines 100-104):
+```rust
+// Initialize invitee_descriptor if it's a new account
+if invitee_descriptor.owner == Pubkey::default() {
+    invitee_descriptor.owner = invitee.key();
+    invitee_descriptor.peers = vec![];
+}
+```
+
+**Why This Matters:** Users can share their wallet address and invite friends immediately. When friends register, invitations are already waiting. This matches web2 UX expectations.
+
 ## Git Commit Guidelines
 
 **IMPORTANT:** Do not include Claude credits in commit messages. Keep commits professional and attribution-free.
