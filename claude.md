@@ -569,9 +569,17 @@ git clone https://github.com/cherrydotfun/stem-proto.git ../stem-proto-reference
 
 **IMPORTANT:** Using **debug build** with Metro, NOT Expo Go.
 - Run with: `npx expo start --clear` (or `npm start`)
-- App runs as native debug build on physical device
+- App runs as native debug build on **PHYSICAL DEVICE** (Seeker phone via ADB)
+- **NEVER use emulator** - always testing on real device
 - Never suggest Expo Go commands or running through Expo Go app
 - Changes require Metro restart, not full rebuild (unless native dependencies change)
+
+**Network Configuration for Physical Device:**
+- Backend runs on host machine (Mac) at `0.0.0.0:3001`
+- Physical device connects via USB/ADB or WiFi
+- **NOT using Android emulator `10.0.2.2` address**
+- Need to use host machine's actual IP address on local network
+- Host IP: `192.168.1.33` (check with `ifconfig` if changed)
 
 ### ✅ FRESH START - New Program Deployed
 
@@ -645,6 +653,65 @@ if invitee_descriptor.owner == Pubkey::default() {
 ```
 
 **Why This Matters:** Users can share their wallet address and invite friends immediately. When friends register, invitations are already waiting. This matches web2 UX expectations.
+
+## CURRENT CRITICAL ISSUES (Jan 19, 2026 - Late Session)
+
+### Issue 1: Socket.io Connection Failing ⚠️ **ACTIVELY DEBUGGING**
+
+**Problem:** Socket.io client on physical device cannot connect to backend server.
+- Backend running at `0.0.0.0:3001` on Mac
+- Client trying to connect to `http://10.0.2.2:3001` (WRONG - this is emulator address!)
+- Physical device needs actual host IP: `192.168.1.33:3001`
+- Error: `❌ Socket connection error: timeout`
+- HTTP fetch test never completes - basic connectivity failing
+- Backend shows zero connection attempts in logs
+
+**Root Cause:** Using emulator address `10.0.2.2` instead of actual host machine IP for physical device.
+
+**What We've Tried:**
+1. ✅ Backend listening on `0.0.0.0:3001` (all interfaces)
+2. ✅ Changed socket.io transport order to `['polling', 'websocket']`
+3. ✅ Disabled WebSocket upgrade
+4. ✅ Added connection error logging
+5. ❌ Still using wrong address for physical device
+
+**Next Steps:**
+1. Change `BACKEND_URL` from `http://10.0.2.2:3001` to `http://192.168.1.33:3001`
+2. Check macOS firewall isn't blocking port 3001
+3. Test if messages persist and broadcast properly once connected
+
+**Files to Fix:**
+- `app/src/hooks/useMukonMessenger.ts` line 20 - Change BACKEND_URL constant
+
+### Issue 2: Constant Wallet Authorization Prompts ⚠️ **TODO AFTER SOCKET FIX**
+
+**Problem:** User gets wallet signature prompts on every screen navigation.
+- Logs show `"Starting wallet authorization..."` constantly
+- `🔐 Re-deriving encryption keypair from wallet...` on every screen
+- Makes app completely unusable
+
+**Root Cause:** Wallet context remounting frequently, probably due to:
+- Navigation triggering wallet provider re-init
+- useEffect dependencies causing re-renders
+- Socket useEffect depends on `encryptionReady` which triggers loops
+
+**Needs Investigation:**
+- How wallet provider is set up in navigation structure
+- Why wallet context isn't persisting across screens
+- May need to restructure context providers at app root
+
+**Priority:** Fix AFTER socket connection works
+
+### Current Message Flow (When Socket Connects):
+
+1. User types message in ChatScreen
+2. `sendMessage()` encrypts with NaCl box using recipient's public key
+3. Socket emits `send_message` with encrypted payload
+4. Backend receives and broadcasts to conversation room
+5. Recipient's socket receives `new_message` event
+6. Message decrypted and displayed
+
+**What's Broken:** Step 3 - socket never connects, so nothing gets sent.
 
 ## Git Commit Guidelines
 

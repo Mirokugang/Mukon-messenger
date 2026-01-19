@@ -15,9 +15,9 @@ import nacl from 'tweetnacl';
 import { Buffer } from 'buffer';
 
 const PROGRAM_ID = new PublicKey('89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr');
-// For Android emulator, use 10.0.2.2 instead of localhost
-// For physical device, use your computer's IP address
-const BACKEND_URL = 'http://10.0.2.2:3001';
+// For physical device via ADB/WiFi, use host machine's actual IP on local network
+// Find host IP with: ifconfig | grep "inet " | grep -v 127.0.0.1
+const BACKEND_URL = 'http://192.168.1.33:3001';
 
 interface Wallet {
   publicKey: PublicKey | null;
