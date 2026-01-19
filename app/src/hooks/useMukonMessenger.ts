@@ -563,11 +563,20 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     if (!wallet?.publicKey || !encryptionKeys) return null;
 
     try {
-      // Find sender's encryption public key from contacts
-      const sender = contacts.find(c => c.publicKey.equals(senderPubkey));
-      if (!sender?.encryptionPublicKey) {
-        console.error('Sender encryption key not found in contacts');
-        return '[Encryption key not found]';
+      // Determine sender's encryption public key
+      let senderEncryptionKey: Uint8Array;
+
+      if (senderPubkey.equals(wallet.publicKey)) {
+        // Decrypting our own message - use our own encryption public key
+        senderEncryptionKey = encryptionKeys.publicKey;
+      } else {
+        // Decrypting someone else's message - look up their key in contacts
+        const sender = contacts.find(c => c.publicKey.equals(senderPubkey));
+        if (!sender?.encryptionPublicKey) {
+          console.error('Sender encryption key not found in contacts');
+          return '[Encryption key not found]';
+        }
+        senderEncryptionKey = sender.encryptionPublicKey;
       }
 
       // Decrypt using NaCl box.open (asymmetric decryption)
@@ -577,7 +586,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       const decrypted = nacl.box.open(
         encryptedBytes,
         nonceBytes,
-        sender.encryptionPublicKey,
+        senderEncryptionKey,
         encryptionKeys.secretKey
       );
 
