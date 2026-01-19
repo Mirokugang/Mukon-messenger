@@ -70,8 +70,8 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       setEncryptionReady(true);
       console.log('✅ Encryption keypair derived');
 
-      // Clean up
-      delete (window as any).__mukonEncryptionSignature;
+      // DON'T delete signature - other screen instances need it
+      // The signature is deterministic anyway (same wallet = same keys)
     } catch (error) {
       console.error('❌ Failed to derive encryption keys:', error);
     }
