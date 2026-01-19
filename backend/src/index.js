@@ -123,7 +123,9 @@ io.on('connection', (socket) => {
 
   socket.on('join_conversation', ({ conversationId }) => {
     socket.join(conversationId);
-    console.log(`${socket.publicKey} joined conversation: ${conversationId}`);
+    const room = io.sockets.adapter.rooms.get(conversationId);
+    const roomSize = room ? room.size : 0;
+    console.log(`${socket.publicKey || socket.id} joined conversation: ${conversationId} (now ${roomSize} clients in room)`);
   });
 
   socket.on('leave_conversation', ({ conversationId }) => {
@@ -164,6 +166,9 @@ io.on('connection', (socket) => {
     messages.get(conversationId).push(messageData);
 
     // Broadcast to conversation (including sender for confirmation)
+    const room = io.sockets.adapter.rooms.get(conversationId);
+    const roomSize = room ? room.size : 0;
+    console.log(`Broadcasting message to room ${conversationId} (${roomSize} clients)`);
     io.to(conversationId).emit('new_message', messageData);
   });
 
