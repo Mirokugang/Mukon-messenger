@@ -13,6 +13,7 @@ import {
 } from '../utils/transactions';
 import nacl from 'tweetnacl';
 import { Buffer } from 'buffer';
+import bs58 from 'bs58';
 
 const PROGRAM_ID = new PublicKey('89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr');
 // For physical device via ADB/WiFi, use host machine's actual IP on local network
@@ -85,7 +86,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
         newSocket.emit('authenticate', {
           publicKey: wallet.publicKey.toBase58(),
-          signature: Buffer.from(signature).toString('base64'),
+          signature: bs58.encode(signature), // Backend expects bs58, not base64
         });
       } catch (error) {
         console.error('❌ Failed to authenticate:', error);
