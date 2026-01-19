@@ -51,12 +51,33 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   // No Anchor program needed - we build transactions manually
 
-  // Initialize socket connection (no encryption blocking for now)
+  // Derive encryption keys ONCE when wallet connects (async, non-blocking)
+  useEffect(() => {
+    if (!wallet?.publicKey || !wallet.signMessage) return;
+    if (encryptionKeys || derivingKeys.current) return; // Already have keys or deriving
+
+    derivingKeys.current = true;
+    (async () => {
+      try {
+        console.log('🔐 Deriving encryption keypair from wallet...');
+        const message = 'Sign this message to derive your encryption keys for Mukon Messenger';
+        const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
+        const keypair = deriveEncryptionKeypair(signature);
+        setEncryptionKeys(keypair);
+        setEncryptionReady(true);
+        console.log('✅ Encryption keypair derived');
+      } catch (error) {
+        console.error('❌ Failed to derive encryption keys:', error);
+        // If user cancels, they can retry later by reloading
+      } finally {
+        derivingKeys.current = false;
+      }
+    })();
+  }, [wallet?.publicKey, encryptionKeys]);
+
+  // Initialize socket connection (separate from encryption)
   useEffect(() => {
     if (!wallet?.publicKey) return;
-
-    // Mark encryption as ready immediately (we'll add proper encryption later)
-    setEncryptionReady(true);
 
     console.log('🔌 Connecting to backend:', BACKEND_URL);
 
@@ -154,7 +175,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     return () => {
       newSocket.disconnect();
     };
-  }, [wallet?.publicKey, encryptionReady]);
+  }, [wallet?.publicKey]);
 
   /**
    * Register a new user with display name
@@ -169,8 +190,8 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       const accountInfo = await connection.getAccountInfo(userProfile);
 
       if (accountInfo) {
-        console.log('User already registered, loading existing profile');
-        await loadProfile();
+        console.log('User already registered');
+        // Profile will be loaded by useEffect once encryption keys are ready
         return null; // Already registered
       }
 
@@ -586,23 +607,11 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
         return;
       }
 
-      // Derive encryption keypair ONLY if we don't have it yet
-      if (!encryptionKeys && !derivingKeys.current) {
-        derivingKeys.current = true;
-        try {
-          console.log('🔐 Re-deriving encryption keypair from wallet...');
-          const message = 'Sign this message to derive your encryption keys for Mukon Messenger';
-          const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
-          const keypair = deriveEncryptionKeypair(signature);
-          setEncryptionKeys(keypair);
-          setEncryptionReady(true);
-          derivingKeys.current = false; // Reset so it doesn't block future calls
-          console.log('✅ Encryption keypair re-derived');
-        } catch (error) {
-          console.error('❌ Failed to derive encryption keys:', error);
-          derivingKeys.current = false;
-          throw error; // Don't continue if we can't derive keys
-        }
+      // Encryption keys needed for decrypting peer info
+      if (!encryptionKeys) {
+        console.warn('⚠️ Encryption keys not yet available, will retry when ready');
+        setProfile(null);
+        return;
       }
 
       // Deserialize UserProfile account
@@ -644,13 +653,13 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     }
   };
 
-  // Load profile and contacts AFTER encryption is ready
+  // Load profile and contacts when encryption keys are available
   useEffect(() => {
-    if (wallet?.publicKey && encryptionReady) {
+    if (wallet?.publicKey && encryptionKeys) {
       loadProfile();
       loadContacts();
     }
-  }, [wallet?.publicKey, encryptionReady]);
+  }, [wallet?.publicKey, encryptionKeys]);
 
   return {
     connection,

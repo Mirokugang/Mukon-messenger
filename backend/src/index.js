@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { PublicKey } = require('@solana/web3.js');
 const nacl = require('tweetnacl');
-const bs58 = require('bs58');
+const bs58 = require('bs58').default; // bs58 v6 uses default export
 
 const app = express();
 const httpServer = createServer(app);
