@@ -554,39 +554,38 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   /**
    * Decrypt a message using NaCl box.open
+   * For 1:1 conversations, we always use the OTHER person's encryption public key
    */
   const decryptConversationMessage = (
     encrypted: string,
     nonce: string,
-    senderPubkey: PublicKey
+    senderPubkey: PublicKey,
+    recipientPubkey: PublicKey
   ): string | null => {
     if (!wallet?.publicKey || !encryptionKeys) return null;
 
     try {
-      // Determine sender's encryption public key
-      let senderEncryptionKey: Uint8Array;
+      // In a 1:1 conversation, determine who the OTHER person is
+      const otherPersonPubkey = senderPubkey.equals(wallet.publicKey)
+        ? recipientPubkey  // If I sent it, the other person is the recipient
+        : senderPubkey;     // If they sent it, the other person is the sender
 
-      if (senderPubkey.equals(wallet.publicKey)) {
-        // Decrypting our own message - use our own encryption public key
-        senderEncryptionKey = encryptionKeys.publicKey;
-      } else {
-        // Decrypting someone else's message - look up their key in contacts
-        const sender = contacts.find(c => c.publicKey.equals(senderPubkey));
-        if (!sender?.encryptionPublicKey) {
-          console.error('Sender encryption key not found in contacts');
-          return '[Encryption key not found]';
-        }
-        senderEncryptionKey = sender.encryptionPublicKey;
+      // Find the other person's encryption key
+      const otherPerson = contacts.find(c => c.publicKey.equals(otherPersonPubkey));
+      if (!otherPerson?.encryptionPublicKey) {
+        console.error('Conversation partner encryption key not found in contacts');
+        return '[Encryption key not found]';
       }
 
       // Decrypt using NaCl box.open (asymmetric decryption)
+      // Always use: other person's encryption public key + my secret key
       const encryptedBytes = Buffer.from(encrypted, 'base64');
       const nonceBytes = Buffer.from(nonce, 'base64');
 
       const decrypted = nacl.box.open(
         encryptedBytes,
         nonceBytes,
-        senderEncryptionKey,
+        otherPerson.encryptionPublicKey,
         encryptionKeys.secretKey
       );
 

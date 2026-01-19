@@ -44,10 +44,12 @@ export default function ChatScreen({ route, navigation }: any) {
     if (!content && msg.encrypted && msg.nonce) {
       try {
         const senderPubkey = new PublicKey(msg.sender);
+        const recipientPubkey = new PublicKey(contact.pubkey);
         const decrypted = messenger.decryptConversationMessage(
           msg.encrypted,
           msg.nonce,
-          senderPubkey
+          senderPubkey,
+          recipientPubkey
         );
         content = decrypted || '[Unable to decrypt]';
       } catch (error) {

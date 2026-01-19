@@ -79,14 +79,16 @@ export default function ContactsScreen({ navigation }: any) {
       // If it's our message OR it has plaintext content, use that
       if (lastMessage.content) {
         lastMessageText = lastMessage.content;
-      } else if (!isMe && lastMessage.encrypted && lastMessage.nonce) {
-        // Only decrypt if it's NOT our message
+      } else if (lastMessage.encrypted && lastMessage.nonce) {
+        // Decrypt any encrypted message (both incoming and our own)
         try {
           const senderPubkey = new PublicKey(lastMessage.sender);
+          const recipientPubkey = item.publicKey; // The contact is the other person
           const decrypted = messenger.decryptConversationMessage(
             lastMessage.encrypted,
             lastMessage.nonce,
-            senderPubkey
+            senderPubkey,
+            recipientPubkey
           );
           lastMessageText = decrypted || '[Encrypted]';
         } catch (error) {
