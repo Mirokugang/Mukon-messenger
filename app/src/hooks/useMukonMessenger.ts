@@ -142,8 +142,15 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
           // Check if message already exists (avoid duplicates from optimistic update)
           const exists = conversationMessages.some(
-            (msg: any) => msg.id === message.id ||
-            (msg.content === message.content && msg.timestamp === message.timestamp)
+            (msg: any) =>
+              msg.id === message.id || // Same real ID
+              (msg.encrypted && message.encrypted &&
+               msg.encrypted === message.encrypted &&
+               msg.nonce === message.nonce &&
+               msg.sender === message.sender) || // Same encrypted message
+              (msg.content && message.content &&
+               msg.content === message.content &&
+               Math.abs(msg.timestamp - message.timestamp) < 5000) // Same plaintext within 5s
           );
 
           if (!exists) {
@@ -659,6 +666,39 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     }
   }, [wallet?.publicKey, encryptionKeys]);
 
+  /**
+   * Load conversation message history from backend
+   */
+  const loadConversationMessages = async (conversationId: string) => {
+    if (!wallet?.publicKey || !wallet.signMessage) return;
+
+    try {
+      // Sign request to authenticate
+      const message = `Get messages from ${conversationId}`;
+      const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
+      const signatureB58 = bs58.encode(signature);
+
+      const url = `${BACKEND_URL}/messages/${conversationId}?sender=${wallet.publicKey.toBase58()}&signature=${encodeURIComponent(signatureB58)}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Failed to load messages: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log(`📜 Loaded ${data.messages.length} messages from backend`);
+
+      // Add messages to state
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        updated.set(conversationId, data.messages);
+        return updated;
+      });
+    } catch (error) {
+      console.error('Failed to load conversation messages:', error);
+    }
+  };
+
   return {
     connection,
     wallet,
@@ -679,6 +719,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     joinConversation,
     leaveConversation,
     decryptConversationMessage,
+    loadConversationMessages,
     loadContacts,
     loadProfile,
   };

@@ -21,10 +21,11 @@ export default function ChatScreen({ route, navigation }: any) {
     return Buffer.from(chatHash).toString('hex');
   }, [wallet.publicKey, contact.pubkey]);
 
-  // Join conversation room when screen mounts
+  // Join conversation room and load message history when screen mounts
   React.useEffect(() => {
     if (conversationId && messenger.socket) {
       messenger.joinConversation(conversationId);
+      messenger.loadConversationMessages(conversationId);
 
       return () => {
         messenger.leaveConversation(conversationId);
@@ -37,10 +38,10 @@ export default function ChatScreen({ route, navigation }: any) {
 
   const messages = conversationMessages.map((msg: any, idx: number) => {
     const isMe = msg.sender === wallet.publicKey?.toBase58();
-    let content = msg.content || '[No content]';
+    let content = msg.content;
 
-    // Only decrypt if it's NOT our message AND it's encrypted
-    if (!isMe && msg.encrypted && msg.nonce && !msg.content) {
+    // Decrypt if message is encrypted and we don't have plaintext
+    if (!content && msg.encrypted && msg.nonce) {
       try {
         const senderPubkey = new PublicKey(msg.sender);
         const decrypted = messenger.decryptConversationMessage(
@@ -53,6 +54,11 @@ export default function ChatScreen({ route, navigation }: any) {
         console.error('Failed to decrypt message:', error);
         content = '[Decryption failed]';
       }
+    }
+
+    // Final fallback
+    if (!content) {
+      content = '[No content]';
     }
 
     return {
