@@ -565,6 +565,14 @@ git clone https://github.com/cherrydotfun/stem-proto.git ../stem-proto-reference
 
 ## Current Status (Jan 19, 2026)
 
+### Development Environment
+
+**IMPORTANT:** Using **debug build** with Metro, NOT Expo Go.
+- Run with: `npx expo start --clear` (or `npm start`)
+- App runs as native debug build on physical device
+- Never suggest Expo Go commands or running through Expo Go app
+- Changes require Metro restart, not full rebuild (unless native dependencies change)
+
 ### ✅ FRESH START - New Program Deployed
 
 **NEW Program ID:** `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`

@@ -57,10 +57,14 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     // Mark encryption as ready immediately (we'll add proper encryption later)
     setEncryptionReady(true);
 
-    const newSocket = io(BACKEND_URL);
+    const newSocket = io(BACKEND_URL, {
+      transports: ['websocket'],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
 
     newSocket.on('connect', async () => {
-      console.log('Connected to backend');
+      console.log('✅ Connected to backend');
 
       try {
         const message = `Authenticate ${newSocket.id}`;
@@ -71,8 +75,16 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
           signature: Buffer.from(signature).toString('base64'),
         });
       } catch (error) {
-        console.error('Failed to authenticate:', error);
+        console.error('❌ Failed to authenticate:', error);
       }
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('❌ Socket connection error:', error.message);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('⚠️  Disconnected from backend:', reason);
     });
 
     newSocket.on('authenticated', (data: any) => {
