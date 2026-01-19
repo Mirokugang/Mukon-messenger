@@ -4,11 +4,11 @@ import { TextInput, Button, Text, IconButton } from 'react-native-paper';
 import { PublicKey } from '@solana/web3.js';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
-import { useMukonMessenger } from '../hooks/useMukonMessenger';
+import { useMessenger } from '../contexts/MessengerContext';
 
 export default function AddContactScreen({ navigation }: any) {
   const wallet = useWallet();
-  const messenger = useMukonMessenger(wallet, 'devnet');
+  const messenger = useMessenger();
   const [address, setAddress] = React.useState('');
   const [loading, setLoading] = React.useState(false);
 

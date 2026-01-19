@@ -5,14 +5,14 @@ import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
-import { useMukonMessenger } from '../hooks/useMukonMessenger';
+import { useMessenger } from '../contexts/MessengerContext';
 import { getChatHash } from '../utils/encryption';
 
 export default function ChatScreen({ route, navigation }: any) {
   const { contact } = route.params;
   const [message, setMessage] = React.useState('');
   const wallet = useWallet();
-  const messenger = useMukonMessenger(wallet, 'devnet');
+  const messenger = useMessenger();
 
   // Get conversation ID from the two public keys
   const conversationId = React.useMemo(() => {
@@ -44,7 +44,10 @@ export default function ChatScreen({ route, navigation }: any) {
     if (!content && msg.encrypted && msg.nonce) {
       try {
         const senderPubkey = new PublicKey(msg.sender);
-        const recipientPubkey = new PublicKey(contact.pubkey);
+        // Recipient is the OTHER person in conversation (not the sender)
+        const recipientPubkey = isMe
+          ? new PublicKey(contact.pubkey)  // You sent it → recipient is contact
+          : wallet.publicKey!;              // They sent it → recipient is you
         const decrypted = messenger.decryptConversationMessage(
           msg.encrypted,
           msg.nonce,

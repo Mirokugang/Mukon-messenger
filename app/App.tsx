@@ -5,6 +5,7 @@ import { Provider as PaperProvider } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { theme } from './src/theme';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
+import { MessengerProvider } from './src/contexts/MessengerContext';
 import WalletConnectScreen from './src/screens/WalletConnectScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
 import ChatScreen from './src/screens/ChatScreen';
@@ -26,16 +27,17 @@ const navTheme = {
 };
 
 function AppNavigator() {
-  const { connected } = useWallet();
+  const wallet = useWallet();
 
-  if (!connected) {
+  if (!wallet.connected) {
     return <WalletConnectScreen />;
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
-      <StatusBar style="light" />
-      <Stack.Navigator
+    <MessengerProvider wallet={wallet} cluster="devnet">
+      <NavigationContainer theme={navTheme}>
+        <StatusBar style="light" />
+        <Stack.Navigator
         screenOptions={{
           headerStyle: {
             backgroundColor: theme.colors.surface,
@@ -68,6 +70,7 @@ function AppNavigator() {
         />
       </Stack.Navigator>
     </NavigationContainer>
+    </MessengerProvider>
   );
 }
 

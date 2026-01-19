@@ -6,11 +6,11 @@ import { Buffer } from 'buffer';
 import { theme } from '../theme';
 import { truncateAddress, getChatHash } from '../utils/encryption';
 import { useWallet } from '../contexts/WalletContext';
-import { useMukonMessenger } from '../hooks/useMukonMessenger';
+import { useMessenger } from '../contexts/MessengerContext';
 
 export default function ContactsScreen({ navigation }: any) {
   const wallet = useWallet();
-  const messenger = useMukonMessenger(wallet, 'devnet');
+  const messenger = useMessenger();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [registering, setRegistering] = React.useState(false);
 
