@@ -59,12 +59,21 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
     console.log('🔌 Connecting to backend:', BACKEND_URL);
 
+    // Test basic HTTP connectivity first
+    fetch(`${BACKEND_URL}/health`)
+      .then(res => res.json())
+      .then(data => console.log('✅ Backend HTTP reachable:', data))
+      .catch(err => console.error('❌ Backend HTTP unreachable:', err.message));
+
     const newSocket = io(BACKEND_URL, {
-      transports: ['polling', 'websocket'], // Try polling first
-      reconnectionAttempts: 5,
+      path: '/socket.io',
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 3,
       reconnectionDelay: 1000,
-      timeout: 10000,
+      timeout: 20000,
       forceNew: true,
+      upgrade: false, // Don't try to upgrade to websocket
+      rememberUpgrade: false,
     });
 
     newSocket.on('connect', async () => {
