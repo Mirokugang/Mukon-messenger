@@ -560,7 +560,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
         return;
       }
 
-      // Derive encryption keypair (SAME as during registration - deterministic)
+      // Derive encryption keypair ONLY if we don't have it yet
       if (!encryptionKeys && !derivingKeys.current) {
         derivingKeys.current = true;
         try {
@@ -570,10 +570,12 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
           const keypair = deriveEncryptionKeypair(signature);
           setEncryptionKeys(keypair);
           setEncryptionReady(true);
+          derivingKeys.current = false; // Reset so it doesn't block future calls
           console.log('✅ Encryption keypair re-derived');
         } catch (error) {
           console.error('❌ Failed to derive encryption keys:', error);
           derivingKeys.current = false;
+          throw error; // Don't continue if we can't derive keys
         }
       }
 

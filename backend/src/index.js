@@ -179,8 +179,8 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Mukon Messenger backend running on port ${PORT}`);
-  console.log(`WebSocket endpoint: ws://localhost:${PORT}`);
-  console.log(`HTTP endpoint: http://localhost:${PORT}`);
+  console.log(`WebSocket endpoint: ws://0.0.0.0:${PORT} (accessible from Android emulator at ws://10.0.2.2:${PORT})`);
+  console.log(`HTTP endpoint: http://0.0.0.0:${PORT}`);
 });
