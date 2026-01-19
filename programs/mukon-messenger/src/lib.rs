@@ -45,7 +45,7 @@ fn get_chat_hash(a: Pubkey, b: Pubkey) -> [u8; 32] {
 pub mod mukon_messenger {
     use super::*;
 
-    pub fn register(ctx: Context<Register>, display_name: String) -> Result<()> {
+    pub fn register(ctx: Context<Register>, display_name: String, encryption_public_key: [u8; 32]) -> Result<()> {
         let wallet_descriptor = &mut ctx.accounts.wallet_descriptor;
         let user_profile = &mut ctx.accounts.user_profile;
         let payer = &ctx.accounts.payer;
@@ -58,6 +58,7 @@ pub mod mukon_messenger {
         user_profile.owner = payer.key();
         user_profile.display_name = display_name.clone();
         user_profile.avatar_url = String::new();
+        user_profile.encryption_public_key = encryption_public_key;
 
         msg!("Register: {:?} with display name: {}", payer.key(), display_name);
 
@@ -226,6 +227,7 @@ pub struct UserProfile {
     pub owner: Pubkey,
     pub display_name: String,
     pub avatar_url: String,
+    pub encryption_public_key: [u8; 32],
 }
 
 #[account]
@@ -237,7 +239,7 @@ pub struct Conversation {
 // Context Structures
 
 #[derive(Accounts)]
-#[instruction(display_name: String)]
+#[instruction(display_name: String, encryption_public_key: [u8; 32])]
 pub struct Register<'info> {
     #[account(
         init,
@@ -250,7 +252,7 @@ pub struct Register<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 32 + (4 + 32) + (4 + 128),
+        space = 8 + 32 + (4 + 32) + (4 + 128) + 32,
         seeds = [b"user_profile", payer.key().as_ref(), USER_PROFILE_VERSION.as_ref()],
         bump
     )]

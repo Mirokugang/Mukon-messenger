@@ -134,7 +134,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
    * Register a new user with display name
    */
   const register = async (displayName: string) => {
-    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+    if (!wallet?.publicKey || !wallet.signTransaction || !wallet.signMessage) throw new Error('Wallet not connected');
 
     setLoading(true);
     try {
@@ -148,8 +148,22 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
         return null; // Already registered
       }
 
+      // Derive encryption keypair from wallet signature (DETERMINISTIC - same keys every time)
+      console.log('🔐 Deriving encryption keypair...');
+      const message = 'Sign this message to derive your encryption keys for Mukon Messenger';
+      const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
+      const keypair = deriveEncryptionKeypair(signature);
+
+      // Store keypair in state for this session
+      setEncryptionKeys(keypair);
+      console.log('✅ Encryption keypair derived');
+
       console.log('Creating register instruction for:', displayName);
-      const instruction = createRegisterInstruction(wallet.publicKey, displayName);
+      const instruction = createRegisterInstruction(
+        wallet.publicKey,
+        displayName,
+        keypair.publicKey
+      );
 
       console.log('Building transaction...');
       const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
@@ -160,16 +174,17 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       console.log('Transaction signed');
 
       console.log('Sending transaction...');
-      const signature = await connection.sendTransaction(signedTransaction);
-      console.log('Transaction sent, signature:', signature);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      console.log('Transaction sent, signature:', txSignature);
 
       console.log('Confirming transaction...');
-      await connection.confirmTransaction(signature, 'confirmed');
+      await connection.confirmTransaction(txSignature, 'confirmed');
 
-      console.log('Registered user:', displayName, 'TX:', signature);
+      console.log('Registered user:', displayName, 'TX:', txSignature);
 
       setProfile({ displayName, publicKey: wallet.publicKey });
-      return signature;
+      setEncryptionReady(true);
+      return txSignature;
     } catch (error) {
       console.error('Failed to register:', error);
       throw error;
@@ -460,7 +475,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
    * Load user profile
    */
   const loadProfile = async () => {
-    if (!wallet?.publicKey) return;
+    if (!wallet?.publicKey || !wallet.signMessage) return;
 
     try {
       const userProfile = getUserProfilePDA(wallet.publicKey);
@@ -472,7 +487,25 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
         // Account doesn't exist - user needs to register
         console.log('No profile found, user needs to register');
         setProfile(null);
+        setEncryptionReady(false);
         return;
+      }
+
+      // Derive encryption keypair (SAME as during registration - deterministic)
+      if (!encryptionKeys && !derivingKeys.current) {
+        derivingKeys.current = true;
+        try {
+          console.log('🔐 Re-deriving encryption keypair from wallet...');
+          const message = 'Sign this message to derive your encryption keys for Mukon Messenger';
+          const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
+          const keypair = deriveEncryptionKeypair(signature);
+          setEncryptionKeys(keypair);
+          setEncryptionReady(true);
+          console.log('✅ Encryption keypair re-derived');
+        } catch (error) {
+          console.error('❌ Failed to derive encryption keys:', error);
+          derivingKeys.current = false;
+        }
       }
 
       // Deserialize UserProfile account
@@ -495,13 +528,18 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       offset += 4;
       const avatarUrlBytes = data.slice(offset, offset + avatarUrlLength);
       const avatarUrl = Buffer.from(avatarUrlBytes).toString('utf8');
+      offset += avatarUrlLength;
 
-      console.log('Profile loaded:', { displayName, avatarUrl });
+      // Read encryption_public_key (32 bytes, no length prefix for fixed array)
+      const encryptionPublicKey = data.slice(offset, offset + 32);
+
+      console.log('Profile loaded:', { displayName, avatarUrl, encryptionPublicKey: Buffer.from(encryptionPublicKey).toString('hex') });
 
       setProfile({
         displayName: displayName || wallet.publicKey.toBase58().slice(0, 8) + '...',
         avatarUrl: avatarUrl || null,
         publicKey: wallet.publicKey,
+        encryptionPublicKey,
       });
     } catch (error) {
       console.error('Failed to load profile:', error);

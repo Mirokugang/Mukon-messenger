@@ -57,15 +57,17 @@ function serializeString(str: string): Buffer {
  */
 export function createRegisterInstruction(
   payer: PublicKey,
-  displayName: string
+  displayName: string,
+  encryptionPublicKey: Uint8Array
 ): TransactionInstruction {
   const walletDescriptor = getWalletDescriptorPDA(payer);
   const userProfile = getUserProfilePDA(payer);
 
-  // Serialize instruction data: discriminator + displayName
+  // Serialize instruction data: discriminator + displayName + encryptionPublicKey (32 bytes, no length prefix)
   const data = Buffer.concat([
     DISCRIMINATORS.register,
     serializeString(displayName),
+    Buffer.from(encryptionPublicKey),
   ]);
 
   return new TransactionInstruction({
