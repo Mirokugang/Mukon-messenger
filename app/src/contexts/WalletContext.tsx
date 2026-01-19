@@ -39,7 +39,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const connect = useCallback(async () => {
     setConnecting(true);
     try {
-      await transact(async (wallet) => {
+      const encryptionSignature = await transact(async (wallet) => {
         console.log('Starting wallet authorization...');
 
         const authResult = await wallet.authorize({
@@ -68,7 +68,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setPublicKey(pubkey);
         setConnected(true);
         console.log('Wallet connected:', pubkey.toBase58());
+
+        // CRITICAL: Derive encryption keys IN THE SAME transact() session
+        console.log('🔐 Deriving encryption keypair (in same session)...');
+        const message = Buffer.from('Sign this message to derive your encryption keys for Mukon Messenger', 'utf8');
+        const signedMessages = await wallet.signMessages({
+          addresses: [authResult.accounts[0].address],
+          payloads: [message],
+        });
+        console.log('✅ Encryption signature obtained');
+        return signedMessages[0];
       });
+
+      // Store encryption signature for useMukonMessenger to use
+      (window as any).__mukonEncryptionSignature = encryptionSignature;
     } catch (error) {
       console.error('Failed to connect wallet:', error);
       console.error('Error stack:', error.stack);

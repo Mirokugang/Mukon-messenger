@@ -51,28 +51,30 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
 
   // No Anchor program needed - we build transactions manually
 
-  // Derive encryption keys ONCE when wallet connects (async, non-blocking)
+  // Derive encryption keys from signature obtained during wallet connect
   useEffect(() => {
-    if (!wallet?.publicKey || !wallet.signMessage) return;
-    if (encryptionKeys || derivingKeys.current) return; // Already have keys or deriving
+    if (!wallet?.publicKey) return;
+    if (encryptionKeys) return; // Already have keys
 
-    derivingKeys.current = true;
-    (async () => {
-      try {
-        console.log('🔐 Deriving encryption keypair from wallet...');
-        const message = 'Sign this message to derive your encryption keys for Mukon Messenger';
-        const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
-        const keypair = deriveEncryptionKeypair(signature);
-        setEncryptionKeys(keypair);
-        setEncryptionReady(true);
-        console.log('✅ Encryption keypair derived');
-      } catch (error) {
-        console.error('❌ Failed to derive encryption keys:', error);
-        // If user cancels, they can retry later by reloading
-      } finally {
-        derivingKeys.current = false;
-      }
-    })();
+    // Check for signature from WalletProvider's connect()
+    const signature = (window as any).__mukonEncryptionSignature;
+    if (!signature) {
+      console.warn('⚠️ No encryption signature available yet');
+      return;
+    }
+
+    try {
+      console.log('🔐 Deriving encryption keypair from signature...');
+      const keypair = deriveEncryptionKeypair(signature);
+      setEncryptionKeys(keypair);
+      setEncryptionReady(true);
+      console.log('✅ Encryption keypair derived');
+
+      // Clean up
+      delete (window as any).__mukonEncryptionSignature;
+    } catch (error) {
+      console.error('❌ Failed to derive encryption keys:', error);
+    }
   }, [wallet?.publicKey, encryptionKeys]);
 
   // Initialize socket connection (separate from encryption)
@@ -195,21 +197,17 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
         return null; // Already registered
       }
 
-      // Derive encryption keypair from wallet signature (DETERMINISTIC - same keys every time)
-      console.log('🔐 Deriving encryption keypair...');
-      const message = 'Sign this message to derive your encryption keys for Mukon Messenger';
-      const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
-      const keypair = deriveEncryptionKeypair(signature);
-
-      // Store keypair in state for this session
-      setEncryptionKeys(keypair);
-      console.log('✅ Encryption keypair derived');
+      // Use encryption keys already derived during connect
+      if (!encryptionKeys) {
+        throw new Error('Encryption keys not available - please reconnect wallet');
+      }
+      console.log('Using existing encryption keys for registration');
 
       console.log('Creating register instruction for:', displayName);
       const instruction = createRegisterInstruction(
         wallet.publicKey,
         displayName,
-        keypair.publicKey
+        encryptionKeys.publicKey
       );
 
       console.log('Building transaction...');
