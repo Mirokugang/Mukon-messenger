@@ -557,7 +557,6 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
         // Account doesn't exist - user needs to register
         console.log('No profile found, user needs to register');
         setProfile(null);
-        setEncryptionReady(false);
         return;
       }
 
