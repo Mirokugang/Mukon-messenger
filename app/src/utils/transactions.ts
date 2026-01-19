@@ -164,6 +164,57 @@ export function createRejectInstruction(
 }
 
 /**
+ * Build update_profile instruction
+ */
+export function createUpdateProfileInstruction(
+  payer: PublicKey,
+  displayName: string | null,
+  avatarUrl: string | null,
+  encryptionPublicKey: Uint8Array | null
+): TransactionInstruction {
+  const userProfile = getUserProfilePDA(payer);
+
+  // Serialize instruction data: discriminator + Option<String> + Option<String> + Option<[u8; 32]>
+  const parts: Buffer[] = [DISCRIMINATORS.updateProfile];
+
+  // Serialize Option<String> for display_name
+  if (displayName !== null) {
+    parts.push(Buffer.from([1])); // Some
+    parts.push(serializeString(displayName));
+  } else {
+    parts.push(Buffer.from([0])); // None
+  }
+
+  // Serialize Option<String> for avatar_url
+  if (avatarUrl !== null) {
+    parts.push(Buffer.from([1])); // Some
+    parts.push(serializeString(avatarUrl));
+  } else {
+    parts.push(Buffer.from([0])); // None
+  }
+
+  // Serialize Option<[u8; 32]> for encryption_public_key
+  if (encryptionPublicKey !== null) {
+    parts.push(Buffer.from([1])); // Some
+    parts.push(Buffer.from(encryptionPublicKey));
+  } else {
+    parts.push(Buffer.from([0])); // None
+  }
+
+  const data = Buffer.concat(parts);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: userProfile, isSigner: false, isWritable: true },
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
  * Build a VersionedTransaction from instructions
  */
 export async function buildTransaction(

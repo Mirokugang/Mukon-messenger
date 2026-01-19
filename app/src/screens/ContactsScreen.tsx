@@ -71,7 +71,31 @@ export default function ContactsScreen({ navigation }: any) {
       ? conversationMessages[conversationMessages.length - 1]
       : null;
 
-    const lastMessageText = lastMessage?.content || '';
+    // Decrypt last message if encrypted
+    let lastMessageText = '';
+    if (lastMessage) {
+      const isMe = lastMessage.sender === wallet.publicKey?.toBase58();
+
+      // If it's our message OR it has plaintext content, use that
+      if (lastMessage.content) {
+        lastMessageText = lastMessage.content;
+      } else if (!isMe && lastMessage.encrypted && lastMessage.nonce) {
+        // Only decrypt if it's NOT our message
+        try {
+          const senderPubkey = new PublicKey(lastMessage.sender);
+          const decrypted = messenger.decryptConversationMessage(
+            lastMessage.encrypted,
+            lastMessage.nonce,
+            senderPubkey
+          );
+          lastMessageText = decrypted || '[Encrypted]';
+        } catch (error) {
+          lastMessageText = '[Encrypted]';
+        }
+      } else {
+        lastMessageText = '[Encrypted]';
+      }
+    }
 
     return {
       id: contact.publicKey.toBase58(),
@@ -173,7 +197,36 @@ export default function ContactsScreen({ navigation }: any) {
         )}
         right={(props) => (
           <View style={styles.rightContainer}>
-            <Text style={styles.timestamp}>{item.timestamp}</Text>
+            <View style={styles.rightTop}>
+              <Text style={styles.timestamp}>{item.timestamp}</Text>
+              <Button
+                icon="delete"
+                mode="text"
+                compact
+                onPress={async () => {
+                  Alert.alert(
+                    'Delete Contact',
+                    `Remove ${item.displayName || truncateAddress(item.pubkey, 4)} from your contacts?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await messenger.rejectInvitation(new PublicKey(item.pubkey));
+                            Alert.alert('Deleted', 'Contact removed');
+                          } catch (error: any) {
+                            Alert.alert('Error', error.message);
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+                textColor={theme.colors.textSecondary}
+              />
+            </View>
             {item.unread > 0 && (
               <Badge style={styles.badge}>{item.unread}</Badge>
             )}
@@ -238,6 +291,11 @@ const styles = StyleSheet.create({
   rightContainer: {
     alignItems: 'flex-end',
     justifyContent: 'center',
+  },
+  rightTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   timestamp: {
     color: theme.colors.textSecondary,

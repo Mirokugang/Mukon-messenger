@@ -338,7 +338,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
   };
 
   /**
-   * Send a message (plain text for now - encryption TODO)
+   * Send an encrypted message using NaCl box
    */
   const sendMessage = async (
     conversationId: string,
@@ -346,22 +346,44 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
     recipientPubkey: PublicKey
   ) => {
     if (!wallet?.publicKey || !socket) throw new Error('Not ready');
+    if (!encryptionKeys) throw new Error('Encryption keys not available');
 
     try {
-      console.log('📨 Sending message to conversation:', conversationId);
+      // Find recipient's encryption public key from contacts
+      const recipient = contacts.find(c => c.publicKey.equals(recipientPubkey));
+      if (!recipient?.encryptionPublicKey) {
+        throw new Error('Recipient encryption key not found - they may need to re-register');
+      }
+
+      console.log('🔒 Encrypting message with NaCl box...');
+
+      // Encrypt message using NaCl box (asymmetric encryption)
+      const nonce = nacl.randomBytes(nacl.box.nonceLength);
+      const messageBytes = new TextEncoder().encode(content);
+
+      const encrypted = nacl.box(
+        messageBytes,
+        nonce,
+        recipient.encryptionPublicKey,
+        encryptionKeys.secretKey
+      );
 
       const timestamp = Date.now();
+      const encryptedBase64 = Buffer.from(encrypted).toString('base64');
+      const nonceBase64 = Buffer.from(nonce).toString('base64');
 
       socket.emit('send_message', {
         conversationId,
-        content,
+        encrypted: encryptedBase64,
+        nonce: nonceBase64,
         sender: wallet.publicKey.toBase58(),
         timestamp,
       });
 
-      console.log('✅ Message sent via socket');
+      console.log('✅ Encrypted message sent via socket');
 
       // Add message optimistically so sender sees it immediately
+      // Store both plaintext (for displaying our own messages) and encrypted (for backend)
       setMessages((prev) => {
         const updated = new Map(prev);
         const conversationMessages = updated.get(conversationId) || [];
@@ -371,7 +393,9 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
             id: `temp-${timestamp}`,
             conversationId,
             sender: wallet.publicKey!.toBase58(),
-            content,
+            content,  // Store plaintext for our own messages
+            encrypted: encryptedBase64,
+            nonce: nonceBase64,
             timestamp,
           },
         ]);
@@ -384,7 +408,7 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
   };
 
   /**
-   * Load contacts from chain
+   * Load contacts from chain (with encryption public keys)
    */
   const loadContacts = async () => {
     if (!wallet?.publicKey) return;
@@ -423,14 +447,51 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
         const state = data[offset];
         offset += 1;
 
+        // Fetch peer's UserProfile to get their encryption public key
+        let peerEncryptionKey: Uint8Array | null = null;
+        let peerDisplayName = peerPubkey.toBase58().slice(0, 8) + '...';
+
+        try {
+          const peerProfilePDA = getUserProfilePDA(peerPubkey);
+          const peerProfileInfo = await connection.getAccountInfo(peerProfilePDA);
+
+          if (peerProfileInfo) {
+            const peerData = peerProfileInfo.data;
+            let peerOffset = 8; // Skip discriminator
+
+            // Skip owner pubkey (32 bytes)
+            peerOffset += 32;
+
+            // Read display_name
+            const displayNameLen = peerData.readUInt32LE(peerOffset);
+            peerOffset += 4;
+            const displayNameBytes = peerData.slice(peerOffset, peerOffset + displayNameLen);
+            peerDisplayName = Buffer.from(displayNameBytes).toString('utf8') || peerDisplayName;
+            peerOffset += displayNameLen;
+
+            // Skip avatar_url
+            const avatarUrlLen = peerData.readUInt32LE(peerOffset);
+            peerOffset += 4;
+            peerOffset += avatarUrlLen;
+
+            // Read encryption_public_key (32 bytes)
+            peerEncryptionKey = peerData.slice(peerOffset, peerOffset + 32);
+
+            console.log(`Loaded encryption key for ${peerDisplayName}:`, Buffer.from(peerEncryptionKey).toString('hex').slice(0, 16) + '...');
+          }
+        } catch (error) {
+          console.warn(`Failed to load profile for peer ${peerPubkey.toBase58()}:`, error);
+        }
+
         peers.push({
           publicKey: peerPubkey,
           state: state === 0 ? 'Invited' : state === 1 ? 'Requested' : state === 2 ? 'Accepted' : 'Rejected',
-          displayName: peerPubkey.toBase58().slice(0, 8) + '...',
+          displayName: peerDisplayName,
+          encryptionPublicKey: peerEncryptionKey,
         });
       }
 
-      console.log('Loaded peers:', peers);
+      console.log('Loaded peers with encryption keys:', peers.length);
       setContacts(peers);
     } catch (error) {
       console.error('Failed to load contacts:', error);
@@ -440,34 +501,43 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
   };
 
   /**
-   * Decrypt a message using the conversation's shared secret
+   * Decrypt a message using NaCl box.open
    */
   const decryptConversationMessage = (
     encrypted: string,
     nonce: string,
-    recipientPubkey: PublicKey
+    senderPubkey: PublicKey
   ): string | null => {
-    if (!wallet?.publicKey) return null;
+    if (!wallet?.publicKey || !encryptionKeys) return null;
 
     try {
-      // Derive same shared secret from chat hash
-      const chatHash = getChatHash(wallet.publicKey, recipientPubkey);
-      const sharedSecret = chatHash.slice(0, 32);
+      // Find sender's encryption public key from contacts
+      const sender = contacts.find(c => c.publicKey.equals(senderPubkey));
+      if (!sender?.encryptionPublicKey) {
+        console.error('Sender encryption key not found in contacts');
+        return '[Encryption key not found]';
+      }
 
-      // Decrypt using symmetric decryption
+      // Decrypt using NaCl box.open (asymmetric decryption)
       const encryptedBytes = Buffer.from(encrypted, 'base64');
       const nonceBytes = Buffer.from(nonce, 'base64');
-      const decrypted = nacl.secretbox.open(encryptedBytes, nonceBytes, sharedSecret);
+
+      const decrypted = nacl.box.open(
+        encryptedBytes,
+        nonceBytes,
+        sender.encryptionPublicKey,
+        encryptionKeys.secretKey
+      );
 
       if (!decrypted) {
         console.error('Failed to decrypt message');
-        return null;
+        return '[Unable to decrypt]';
       }
 
       return new TextDecoder().decode(decrypted);
     } catch (error) {
       console.error('Decryption error:', error);
-      return null;
+      return '[Decryption error]';
     }
   };
 
@@ -534,6 +604,34 @@ export function useMukonMessenger(wallet: Wallet | null, cluster: string = 'devn
       const encryptionPublicKey = data.slice(offset, offset + 32);
 
       console.log('Profile loaded:', { displayName, avatarUrl, encryptionPublicKey: Buffer.from(encryptionPublicKey).toString('hex') });
+
+      // Check if encryption key is all zeros (user registered before encryption was added)
+      const isKeyEmpty = Buffer.from(encryptionPublicKey).every(byte => byte === 0);
+
+      if (isKeyEmpty && encryptionKeys) {
+        // Update profile with the derived encryption key
+        console.log('🔑 Encryption key is missing, updating profile...');
+        try {
+          const { createUpdateProfileInstruction, buildTransaction } = await import('../utils/transactions');
+          const instruction = createUpdateProfileInstruction(
+            wallet.publicKey,
+            null,  // Don't change display name
+            null,  // Don't change avatar
+            encryptionKeys.publicKey
+          );
+          const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+          const signedTransaction = await wallet.signTransaction(transaction);
+          const signature = await connection.sendTransaction(signedTransaction);
+          await connection.confirmTransaction(signature, 'confirmed');
+          console.log('✅ Encryption key updated on-chain');
+
+          // Reload profile to get updated key
+          await loadProfile();
+          return;
+        } catch (error) {
+          console.error('❌ Failed to update encryption key:', error);
+        }
+      }
 
       setProfile({
         displayName: displayName || wallet.publicKey.toBase58().slice(0, 8) + '...',

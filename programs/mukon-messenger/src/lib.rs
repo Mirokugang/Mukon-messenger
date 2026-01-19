@@ -68,7 +68,8 @@ pub mod mukon_messenger {
     pub fn update_profile(
         ctx: Context<UpdateProfile>,
         display_name: Option<String>,
-        avatar_url: Option<String>
+        avatar_url: Option<String>,
+        encryption_public_key: Option<[u8; 32]>
     ) -> Result<()> {
         let user_profile = &mut ctx.accounts.user_profile;
 
@@ -79,6 +80,10 @@ pub mod mukon_messenger {
 
         if let Some(url) = avatar_url {
             user_profile.avatar_url = url;
+        }
+
+        if let Some(key) = encryption_public_key {
+            user_profile.encryption_public_key = key;
         }
 
         msg!("Profile updated: {:?}", ctx.accounts.payer.key());
