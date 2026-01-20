@@ -103,26 +103,60 @@ pub mod mukon_messenger {
             invitee_descriptor.peers = vec![];
         }
 
-        require!(
-            inviter_descriptor.peers.iter().all(|p| p.wallet != invitee.key()),
-            ErrorCode::AlreadyInvited
-        );
-        require!(
-            invitee_descriptor.peers.iter().all(|p| p.wallet != inviter.key()),
-            ErrorCode::AlreadyInvited
-        );
-
         let hash = get_chat_hash(inviter.key(), invitee.key());
         require!(hash == _hash, ErrorCode::InvalidHash);
 
-        inviter_descriptor.peers.push(Peer {
-            wallet: invitee.key(),
-            state: PeerState::Invited,
-        });
-        invitee_descriptor.peers.push(Peer {
-            wallet: inviter.key(),
-            state: PeerState::Requested,
-        });
+        // Check inviter's side: allow re-invite if Rejected, block if Blocked
+        let inviter_peer = inviter_descriptor.peers.iter_mut()
+            .find(|p| p.wallet == invitee.key());
+
+        match inviter_peer {
+            Some(peer) if peer.state == PeerState::Rejected => {
+                // Re-inviting rejected contact - update state
+                peer.state = PeerState::Invited;
+            },
+            Some(peer) if peer.state == PeerState::Blocked => {
+                // Cannot invite blocked user
+                return Err(ErrorCode::AlreadyInvited.into());
+            },
+            Some(_) => {
+                // Peer exists with non-Rejected/non-Blocked status
+                return Err(ErrorCode::AlreadyInvited.into());
+            },
+            None => {
+                // New peer - add to list
+                inviter_descriptor.peers.push(Peer {
+                    wallet: invitee.key(),
+                    state: PeerState::Invited,
+                });
+            }
+        }
+
+        // Check invitee's side: allow re-invite if Rejected, block if Blocked
+        let invitee_peer = invitee_descriptor.peers.iter_mut()
+            .find(|p| p.wallet == inviter.key());
+
+        match invitee_peer {
+            Some(peer) if peer.state == PeerState::Rejected => {
+                // Re-inviting rejected contact - update state
+                peer.state = PeerState::Requested;
+            },
+            Some(peer) if peer.state == PeerState::Blocked => {
+                // Cannot invite blocked user
+                return Err(ErrorCode::AlreadyInvited.into());
+            },
+            Some(_) => {
+                // Peer exists with non-Rejected/non-Blocked status
+                return Err(ErrorCode::AlreadyInvited.into());
+            },
+            None => {
+                // New peer - add to list
+                invitee_descriptor.peers.push(Peer {
+                    wallet: inviter.key(),
+                    state: PeerState::Requested,
+                });
+            }
+        }
 
         let conversation = &mut ctx.accounts.conversation;
         conversation.participants = [inviter.key(), invitee.key()];
@@ -176,14 +210,17 @@ pub mod mukon_messenger {
         let me_descriptor = &mut ctx.accounts.payer_descriptor;
         let peer_descriptor = &mut ctx.accounts.peer_descriptor;
 
+        // Allow rejecting pending invites OR deleting accepted contacts
         require!(
             me_descriptor.peers.iter()
-                .any(|p| p.wallet == peer.key() && p.state == PeerState::Requested),
+                .any(|p| p.wallet == peer.key() &&
+                     (p.state == PeerState::Requested || p.state == PeerState::Accepted)),
             ErrorCode::NotRequested
         );
         require!(
             peer_descriptor.peers.iter()
-                .any(|p| p.wallet == me.key() && p.state == PeerState::Invited),
+                .any(|p| p.wallet == me.key() &&
+                     (p.state == PeerState::Invited || p.state == PeerState::Accepted)),
             ErrorCode::NotInvited
         );
 
@@ -205,6 +242,82 @@ pub mod mukon_messenger {
 
         Ok(())
     }
+
+    pub fn block(ctx: Context<Block>) -> Result<()> {
+        let me = &ctx.accounts.payer;
+        let peer = &ctx.accounts.peer;
+        let me_descriptor = &mut ctx.accounts.payer_descriptor;
+        let peer_descriptor = &mut ctx.accounts.peer_descriptor;
+
+        // Can block anyone you have a relationship with (any state except doesn't exist)
+        require!(
+            me_descriptor.peers.iter()
+                .any(|p| p.wallet == peer.key()),
+            ErrorCode::NotInvited
+        );
+        require!(
+            peer_descriptor.peers.iter()
+                .any(|p| p.wallet == me.key()),
+            ErrorCode::NotInvited
+        );
+
+        // Set both sides to Blocked (symmetric)
+        for p in me_descriptor.peers.iter_mut() {
+            if p.wallet == peer.key() {
+                p.state = PeerState::Blocked;
+                break;
+            }
+        }
+        for p in peer_descriptor.peers.iter_mut() {
+            if p.wallet == me.key() {
+                p.state = PeerState::Blocked;
+                break;
+            }
+        }
+
+        msg!("Block: blocker={:?}, blocked={:?}",
+             me.key(), peer.key());
+
+        Ok(())
+    }
+
+    pub fn unblock(ctx: Context<Unblock>) -> Result<()> {
+        let me = &ctx.accounts.payer;
+        let peer = &ctx.accounts.peer;
+        let me_descriptor = &mut ctx.accounts.payer_descriptor;
+        let peer_descriptor = &mut ctx.accounts.peer_descriptor;
+
+        // Can only unblock if currently blocked
+        require!(
+            me_descriptor.peers.iter()
+                .any(|p| p.wallet == peer.key() && p.state == PeerState::Blocked),
+            ErrorCode::NotInvited
+        );
+        require!(
+            peer_descriptor.peers.iter()
+                .any(|p| p.wallet == me.key() && p.state == PeerState::Blocked),
+            ErrorCode::NotInvited
+        );
+
+        // Change Blocked → Rejected (allows re-invite after unblock)
+        for p in me_descriptor.peers.iter_mut() {
+            if p.wallet == peer.key() {
+                p.state = PeerState::Rejected;
+                break;
+            }
+        }
+        for p in peer_descriptor.peers.iter_mut() {
+            if p.wallet == me.key() {
+                p.state = PeerState::Rejected;
+                break;
+            }
+        }
+
+        msg!("Unblock: unblocker={:?}, unblocked={:?}",
+             me.key(), peer.key());
+
+        Ok(())
+    }
 }
 
 // Account Structures
@@ -219,6 +332,7 @@ pub enum PeerState {
     Requested = 1,
     Accepted = 2,
     Rejected = 3,
+    Blocked = 4,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -314,7 +428,7 @@ pub struct Invite<'info> {
     )]
     pub invitee_descriptor: Account<'info, WalletDescriptor>,
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         space = 8 + 64 + 8,
         seeds = [b"conversation", _hash.as_ref(), CONVERSATION_VERSION.as_ref()],
@@ -346,6 +460,46 @@ pub struct Accept<'info> {
 
 #[derive(Accounts)]
 pub struct Reject<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: peer is a public key
+    pub peer: AccountInfo<'info>,
+    #[account(
+        mut,
+        seeds = [b"wallet_descriptor", payer.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
+        bump
+    )]
+    pub payer_descriptor: Account<'info, WalletDescriptor>,
+    #[account(
+        mut,
+        seeds = [b"wallet_descriptor", peer.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
+        bump
+    )]
+    pub peer_descriptor: Account<'info, WalletDescriptor>,
+}
+
+#[derive(Accounts)]
+pub struct Block<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: peer is a public key
+    pub peer: AccountInfo<'info>,
+    #[account(
+        mut,
+        seeds = [b"wallet_descriptor", payer.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
+        bump
+    )]
+    pub payer_descriptor: Account<'info, WalletDescriptor>,
+    #[account(
+        mut,
+        seeds = [b"wallet_descriptor", peer.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
+        bump
+    )]
+    pub peer_descriptor: Account<'info, WalletDescriptor>,
+}
+
+#[derive(Accounts)]
+pub struct Unblock<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     /// CHECK: peer is a public key

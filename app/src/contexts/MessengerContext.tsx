@@ -11,6 +11,8 @@ import {
   createInviteInstruction,
   createAcceptInvitationInstruction,
   createRejectInvitationInstruction,
+  createBlockInstruction,
+  createUnblockInstruction,
   buildTransaction,
   deserializeWalletDescriptor,
 } from '../utils/transactions';
@@ -49,6 +51,8 @@ interface MessengerContextType {
   acceptInvitation: (inviterPubkey: PublicKey) => Promise<string>;
   rejectInvitation: (inviterPubkey: PublicKey) => Promise<string>;
   deleteContact: (contactPubkey: PublicKey) => Promise<string>;
+  blockContact: (contactPubkey: PublicKey) => Promise<string>;
+  unblockContact: (contactPubkey: PublicKey) => Promise<string>;
   sendMessage: (conversationId: string, content: string, recipientPubkey: PublicKey) => Promise<void>;
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
@@ -369,6 +373,48 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     return rejectInvitation(contactPubkey);
   };
 
+  const blockContact = async (contactPubkey: PublicKey) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createBlockInstruction(wallet.publicKey, contactPubkey);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      await loadContacts();
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to block contact:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const unblockContact = async (contactPubkey: PublicKey) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createUnblockInstruction(wallet.publicKey, contactPubkey);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      await loadContacts();
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to unblock contact:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const sendMessage = async (conversationId: string, content: string, recipientPubkey: PublicKey) => {
     if (!wallet?.publicKey || !socket) throw new Error('Not ready');
     if (!encryptionKeys) throw new Error('Encryption keys not available');
@@ -657,6 +703,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     acceptInvitation,
     rejectInvitation,
     deleteContact,
+    blockContact,
+    unblockContact,
     sendMessage,
     joinConversation,
     leaveConversation,

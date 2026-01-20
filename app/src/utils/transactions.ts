@@ -17,6 +17,8 @@ const DISCRIMINATORS = {
   accept: Buffer.from([65, 150, 70, 216, 133, 6, 107, 4]),
   reject: Buffer.from([135, 7, 63, 85, 131, 114, 111, 224]),
   updateProfile: Buffer.from([98, 67, 99, 206, 86, 115, 175, 1]),
+  block: Buffer.from([238, 234, 110, 21, 121, 43, 50, 145]),
+  unblock: Buffer.from([194, 49, 173, 43, 246, 164, 14, 11]),
 };
 
 // PDA derivation helpers
@@ -140,7 +142,7 @@ export function createAcceptInstruction(
 }
 
 /**
- * Build reject instruction
+ * Build reject instruction (delete contact)
  */
 export function createRejectInstruction(
   payer: PublicKey,
@@ -150,6 +152,57 @@ export function createRejectInstruction(
   const peerDescriptor = getWalletDescriptorPDA(peer);
 
   const data = DISCRIMINATORS.reject;
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: peer, isSigner: false, isWritable: false },
+      { pubkey: payerDescriptor, isSigner: false, isWritable: true },
+      { pubkey: peerDescriptor, isSigner: false, isWritable: true },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+// Alias for consistency
+export const createRejectInvitationInstruction = createRejectInstruction;
+
+/**
+ * Build block instruction (hard block contact)
+ */
+export function createBlockInstruction(
+  payer: PublicKey,
+  peer: PublicKey
+): TransactionInstruction {
+  const payerDescriptor = getWalletDescriptorPDA(payer);
+  const peerDescriptor = getWalletDescriptorPDA(peer);
+
+  const data = DISCRIMINATORS.block;
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: peer, isSigner: false, isWritable: false },
+      { pubkey: payerDescriptor, isSigner: false, isWritable: true },
+      { pubkey: peerDescriptor, isSigner: false, isWritable: true },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Build unblock instruction (change Blocked → Rejected)
+ */
+export function createUnblockInstruction(
+  payer: PublicKey,
+  peer: PublicKey
+): TransactionInstruction {
+  const payerDescriptor = getWalletDescriptorPDA(payer);
+  const peerDescriptor = getWalletDescriptorPDA(peer);
+
+  const data = DISCRIMINATORS.unblock;
 
   return new TransactionInstruction({
     keys: [
@@ -239,7 +292,7 @@ export async function buildTransaction(
 // Deserialization helpers
 export interface Peer {
   pubkey: PublicKey;
-  status: 'Invited' | 'Requested' | 'Accepted' | 'Rejected';
+  status: 'Invited' | 'Requested' | 'Accepted' | 'Rejected' | 'Blocked';
 }
 
 export interface WalletDescriptor {
@@ -269,11 +322,12 @@ export function deserializeWalletDescriptor(data: Buffer): WalletDescriptor {
     const stateNum = data.readUInt8(offset);
     offset += 1;
 
-    const status = ['Invited', 'Requested', 'Accepted', 'Rejected'][stateNum] as
+    const status = ['Invited', 'Requested', 'Accepted', 'Rejected', 'Blocked'][stateNum] as
       | 'Invited'
       | 'Requested'
       | 'Accepted'
-      | 'Rejected';
+      | 'Rejected'
+      | 'Blocked';
 
     peers.push({ pubkey, status });
   }
