@@ -54,6 +54,7 @@ interface MessengerContextType {
   blockContact: (contactPubkey: PublicKey) => Promise<string>;
   unblockContact: (contactPubkey: PublicKey) => Promise<string>;
   sendMessage: (conversationId: string, content: string, recipientPubkey: PublicKey) => Promise<void>;
+  deleteMessage: (conversationId: string, messageId: string, deleteForBoth: boolean) => void;
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
   decryptConversationMessage: (encrypted: string, nonce: string, senderPubkey: PublicKey, recipientPubkey: PublicKey) => string | null;
@@ -228,6 +229,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           return updated;
         });
       }
+    });
+
+    newSocket.on('message_deleted', ({ conversationId, messageId }) => {
+      console.log('Message deleted:', conversationId, messageId);
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        const conversationMessages = updated.get(conversationId) || [];
+        updated.set(conversationId, conversationMessages.filter(m => m.id !== messageId));
+        return updated;
+      });
     });
 
     setSocket(newSocket);
@@ -475,6 +486,28 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     }
   };
 
+  const deleteMessage = (conversationId: string, messageId: string, deleteForBoth: boolean) => {
+    if (!socket) {
+      console.error('Socket not connected');
+      return;
+    }
+
+    if (deleteForBoth) {
+      // Delete for everyone - emit to backend
+      socket.emit('delete_message', { conversationId, messageId, deleteForBoth: true });
+      console.log('🗑️ Deleting message for everyone:', messageId);
+    } else {
+      // Delete for self only - remove from local state
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        const conversationMessages = updated.get(conversationId) || [];
+        updated.set(conversationId, conversationMessages.filter(m => m.id !== messageId));
+        return updated;
+      });
+      console.log('🗑️ Deleted message locally:', messageId);
+    }
+  };
+
   const joinConversation = (conversationId: string) => {
     if (socket) {
       socket.emit('join_conversation', { conversationId });
@@ -706,6 +739,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     blockContact,
     unblockContact,
     sendMessage,
+    deleteMessage,
     joinConversation,
     leaveConversation,
     decryptConversationMessage,

@@ -173,6 +173,25 @@ io.on('connection', (socket) => {
     io.to(conversationId).emit('new_message', messageData);
   });
 
+  socket.on('delete_message', ({ conversationId, messageId, deleteForBoth }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    if (deleteForBoth) {
+      // Delete from backend storage (delete for everyone)
+      const msgs = messages.get(conversationId) || [];
+      const filtered = msgs.filter(m => m.id !== messageId);
+      messages.set(conversationId, filtered);
+
+      // Broadcast deletion to everyone in room
+      io.to(conversationId).emit('message_deleted', { conversationId, messageId });
+      console.log(`Message ${messageId} deleted for everyone in ${conversationId}`);
+    }
+    // If deleteForBoth is false, client handles local deletion only
+  });
+
   socket.on('typing', ({ conversationId }) => {
     socket.to(conversationId).emit('user_typing', {
       publicKey: socket.publicKey
