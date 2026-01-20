@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
-import { TextInput, IconButton, Text, Avatar } from 'react-native-paper';
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { TextInput, IconButton, Text, Avatar, Menu } from 'react-native-paper';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { theme } from '../theme';
@@ -11,6 +11,7 @@ import { getChatHash } from '../utils/encryption';
 export default function ChatScreen({ route, navigation }: any) {
   const { contact } = route.params;
   const [message, setMessage] = React.useState('');
+  const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
   const wallet = useWallet();
   const messenger = useMessenger();
   const flatListRef = React.useRef<FlatList>(null);
@@ -110,18 +111,41 @@ export default function ChatScreen({ route, navigation }: any) {
     }
   };
 
+  const handleDeleteMessage = (messageId: string, deleteForBoth: boolean) => {
+    messenger.deleteMessage(conversationId, messageId, deleteForBoth);
+    setMenuVisible(null);
+  };
+
   const renderMessage = ({ item }: any) => (
-    <View
-      style={[
-        styles.messageBubble,
-        item.isMe ? styles.myMessage : styles.theirMessage,
-      ]}
+    <Menu
+      visible={menuVisible === item.id}
+      onDismiss={() => setMenuVisible(null)}
+      anchor={
+        <TouchableOpacity
+          onLongPress={() => setMenuVisible(item.id)}
+          style={[
+            styles.messageBubble,
+            item.isMe ? styles.myMessage : styles.theirMessage,
+          ]}
+        >
+          <Text style={styles.messageText}>{item.content}</Text>
+          <Text style={styles.messageTime}>
+            {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </TouchableOpacity>
+      }
     >
-      <Text style={styles.messageText}>{item.content}</Text>
-      <Text style={styles.messageTime}>
-        {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </Text>
-    </View>
+      <Menu.Item
+        onPress={() => handleDeleteMessage(item.id, false)}
+        title="Delete for Me"
+      />
+      {item.isMe && (
+        <Menu.Item
+          onPress={() => handleDeleteMessage(item.id, true)}
+          title="Delete for Everyone"
+        />
+      )}
+    </Menu>
   );
 
   return (

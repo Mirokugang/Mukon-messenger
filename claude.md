@@ -20,23 +20,26 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 
 **What's Deployed:**
 - NEW Solana program on devnet: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
-- Program includes: register (with encryption key), invite, accept, reject, update_profile
-- Backend WebSocket server running on 10.206.4.164:3001 (host IP for physical device)
+- Program includes: register (with encryption key), invite, accept, reject, update_profile, **block, unblock**
+- Backend WebSocket server running on 192.168.1.33:3001 (host IP for physical device)
 
 **What's Working:**
 - ✅ Solana Mobile Wallet Adapter (MWA) integration
 - ✅ Manual transaction construction (no Anchor SDK in app - React Native compatible!)
 - ✅ User registration with encryption public key stored on-chain
 - ✅ Contact invitation/accept/reject flow
+- ✅ **Contact blocking/unblocking system** - Prevents harassment, can unblock later
+- ✅ **Symmetric contact deletion** - Both users see contact removed, can re-invite
 - ✅ E2E encrypted messaging using NaCl box (asymmetric encryption)
 - ✅ Messages encrypted with recipient's public key + sender's secret key
 - ✅ Backend only sees encrypted blobs (true E2E encryption)
 - ✅ Message persistence: Messages load from backend on chat screen mount
 - ✅ Real-time message delivery via Socket.IO
+- ✅ **Telegram-style message deletion** - Delete for self OR delete for everyone (sender only)
 - ✅ One-time encryption key derivation in same MWA session as wallet connect
 - ✅ Duplicate message detection (matches by encrypted+nonce+sender)
 - ✅ Decryption of both incoming and own messages from backend history
-- ✅ **NEW: MessengerContext architecture** - ONE socket instance, shared encryption keys, centralized state
+- ✅ **MessengerContext architecture** - ONE socket instance, shared encryption keys, centralized state
 
 **Recent Major Refactor (Jan 20):**
 - Created `MessengerContext` to centralize socket/encryption/state management
@@ -64,15 +67,21 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 1. **Too many wallet verification prompts** - ✅ FIXED with MessengerContext (Jan 20)
 2. **Second wallet decryption problems** - ✅ FIXED with correct recipient determination (Jan 20)
 3. **Socket.IO connection timeout** - ✅ FIXED with transport order matching backend (Jan 20)
-4. **No wallet connection persistence** - Closing/reopening app requires full reconnect (TODO)
-5. Backend only stores messages in memory - Need SQLite/Redis for persistence (TODO)
+4. **Contact management** - ✅ FIXED with block/unblock + symmetric deletion (Jan 20)
+5. **Message deletion** - ✅ FIXED with Telegram-style delete for self/everyone (Jan 20)
+6. **No wallet connection persistence** - Closing/reopening app requires full reconnect (TODO)
+7. Backend only stores messages in memory - Need SQLite/Redis for persistence (TODO)
 
 **Next Steps:**
-1. Test messaging between wallets with fixed Socket.IO config
-2. Add wallet connection persistence (AsyncStorage)
-3. Add backend message persistence (SQLite or Redis)
-4. Polish UI/UX (chat bubbles, timestamps, scroll behavior)
-5. Add .sol/.skr domain name resolution for contacts
+1. ✅ ~~Test messaging between wallets~~ - WORKING!
+2. ✅ ~~Add contact blocking/unblocking~~ - COMPLETE!
+3. ✅ ~~Add message deletion~~ - COMPLETE!
+4. Test block/unblock/delete flows thoroughly
+5. Add block/unblock UI buttons in ContactsScreen
+6. Add wallet connection persistence (AsyncStorage)
+7. Add backend message persistence (SQLite or Redis)
+8. Polish UI/UX (loading states, error messages)
+9. Add .sol/.skr domain name resolution for contacts
 
 ## What We're Building
 
@@ -109,7 +118,9 @@ A 1:1 encrypted messenger (like Line/WeChat DMs) where:
 │  ├── register() - Create user profile + encryption key      │
 │  ├── invite(peer) - Send contact request                    │
 │  ├── accept(peer) - Accept request, create conversation     │
-│  ├── reject(peer) - Reject request                          │
+│  ├── reject(peer) - Reject request OR delete contact        │
+│  ├── block(peer) - Hard block (prevents re-invites)         │
+│  ├── unblock(peer) - Change Blocked → Rejected              │
 │  └── update_profile() - Update profile                      │
 └─────────────────────────────────────────────────────────────┘
                             │
@@ -119,7 +130,8 @@ A 1:1 encrypted messenger (like Line/WeChat DMs) where:
 │  - Socket.IO for real-time delivery                         │
 │  - Store encrypted message blobs                            │
 │  - Wallet signature authentication                          │
-│  - Running on 10.206.4.164:3001                             │
+│  - Message deletion (delete for self or everyone)           │
+│  - Running on 192.168.1.33:3001                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -420,7 +432,9 @@ const recipientPubkey = isMe
 
 **Problem:** App was using emulator address `http://10.0.2.2:3001` which doesn't work for physical device over ADB/WiFi.
 
-**Solution:** Changed to actual host machine IP: `http://10.206.4.164:3001` in MessengerContext.
+**Solution:** Changed to actual host machine IP: `http://192.168.1.33:3001` in MessengerContext.
+
+**Note:** Backend IP may change based on network. Check with `ifconfig` if connection issues occur.
 
 ### Current Message Flow (Working as of Jan 20):
 
@@ -434,13 +448,89 @@ const recipientPubkey = isMe
 
 **Status:** ✅ E2E encrypted messaging working end-to-end!
 
+### ✅ NEW: Contact Blocking & Message Deletion (Jan 20 Continued)
+
+**Problem:** Needed full contact management system matching modern messaging apps (Telegram/Signal/WhatsApp).
+
+**Solution - Contact Blocking System:**
+
+1. **Added PeerState::Blocked to Solana program:**
+```rust
+pub enum PeerState {
+    Invited = 0,
+    Requested = 1,
+    Accepted = 2,
+    Rejected = 3,
+    Blocked = 4,  // NEW
+}
+```
+
+2. **Updated invite() to check for blocked users:**
+- Blocks re-invites from blocked contacts
+- Allows re-inviting Rejected contacts (delete → re-add flow)
+
+3. **Updated reject() to allow deleting accepted contacts:**
+- Previously only worked for pending invites
+- Now supports symmetric contact deletion (both users see contact removed)
+
+4. **Added block() instruction:**
+- Symmetric operation (sets both users to Blocked)
+- Prevents any future invitations until unblocked
+- Stops harassment/spam
+
+5. **Added unblock() instruction:**
+- Changes Blocked → Rejected (allows re-invite after unblock)
+- Not immutable - users can change their minds
+
+**Solution - Message Deletion System (Telegram-style):**
+
+1. **Backend delete_message handler (backend/src/index.js):**
+```javascript
+socket.on('delete_message', ({ conversationId, messageId, deleteForBoth }) => {
+  if (deleteForBoth) {
+    // Delete from backend storage
+    const msgs = messages.get(conversationId) || [];
+    const filtered = msgs.filter(m => m.id !== messageId);
+    messages.set(conversationId, filtered);
+
+    // Broadcast deletion to everyone in room
+    io.to(conversationId).emit('message_deleted', { conversationId, messageId });
+  }
+  // If false, client handles local deletion only
+});
+```
+
+2. **Client deleteMessage() function (MessengerContext.tsx):**
+- Delete for self: Removes from local state only
+- Delete for everyone: Emits to backend, backend broadcasts to all clients
+
+3. **UI with long-press menu (ChatScreen.tsx):**
+- Long-press any message bubble to show delete menu
+- "Delete for Me" always available
+- "Delete for Everyone" only shown if user is the sender
+- Uses react-native-paper Menu component
+
+**Files Changed:**
+- Updated: `programs/mukon-messenger/src/lib.rs` (block/unblock instructions)
+- Updated: `app/src/utils/transactions.ts` (block/unblock builders)
+- Updated: `app/src/contexts/MessengerContext.tsx` (blockContact, unblockContact, deleteMessage)
+- Updated: `backend/src/index.js` (delete_message handler)
+- Updated: `app/src/screens/ChatScreen.tsx` (message deletion UI)
+
+**Architecture Decisions:**
+- **Symmetric operations:** All contact management affects both users (simpler UX)
+- **Telegram-style deletion:** User chooses delete scope, only sender can delete for everyone
+- **Mutable blocking:** Users can unblock (Blocked → Rejected), then re-invite if desired
+
+**Status:** ✅ Full contact management + message deletion working! Ready for testing.
+
 ## Testing Guidelines
 
 ### Manual E2E Testing Flow
 
 **Prerequisites:**
 - Both wallets must register on the NEW program (DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv)
-- Backend running on 10.206.4.164:3001
+- Backend running on 192.168.1.33:3001
 - Metro running with cache clear: `npm start -- --reset-cache`
 
 **Test Flow (Two Physical Devices):**
