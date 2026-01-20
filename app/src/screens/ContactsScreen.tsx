@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, FlatList, StyleSheet, Alert } from 'react-native';
-import { List, FAB, Searchbar, Avatar, Badge, Text, Button } from 'react-native-paper';
+import { View, FlatList, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { List, FAB, Searchbar, Avatar, Badge, Text, Button, Menu } from 'react-native-paper';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { theme } from '../theme';
@@ -13,6 +13,7 @@ export default function ContactsScreen({ navigation }: any) {
   const messenger = useMessenger();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [registering, setRegistering] = React.useState(false);
+  const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
 
   // Register user if not already registered
   const handleRegister = async () => {
@@ -183,59 +184,137 @@ export default function ContactsScreen({ navigation }: any) {
       );
     }
 
-    // Accepted - normal contact
-    return (
-      <List.Item
-        title={item.displayName || truncateAddress(item.pubkey, 4)}
-        description={item.lastMessage}
-        onPress={() => navigation.navigate('Chat', { contact: item })}
-        left={(props) => (
-          <Avatar.Text
-            {...props}
-            size={48}
-            label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
-            style={{ backgroundColor: theme.colors.primary }}
-          />
-        )}
-        right={(props) => (
-          <View style={styles.rightContainer}>
-            <View style={styles.rightTop}>
-              <Text style={styles.timestamp}>{item.timestamp}</Text>
-              <Button
-                icon="delete"
-                mode="text"
-                compact
-                onPress={async () => {
-                  Alert.alert(
-                    'Delete Contact',
-                    `Remove ${item.displayName || truncateAddress(item.pubkey, 4)} from your contacts?`,
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Delete',
-                        style: 'destructive',
-                        onPress: async () => {
-                          try {
-                            await messenger.rejectInvitation(new PublicKey(item.pubkey));
-                            Alert.alert('Deleted', 'Contact removed');
-                          } catch (error: any) {
-                            Alert.alert('Error', error.message);
-                          }
-                        },
+    // Blocked contact - show unblock option
+    if (item.state === 'Blocked') {
+      return (
+        <List.Item
+          title={item.displayName || truncateAddress(item.pubkey, 4)}
+          description="Blocked"
+          left={(props) => (
+            <Avatar.Text
+              {...props}
+              size={48}
+              label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+              style={{ backgroundColor: '#888' }}
+            />
+          )}
+          right={() => (
+            <Button
+              mode="outlined"
+              onPress={async () => {
+                Alert.alert(
+                  'Unblock Contact',
+                  `Unblock ${item.displayName || truncateAddress(item.pubkey, 4)}?`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Unblock',
+                      onPress: async () => {
+                        try {
+                          await messenger.unblockContact(new PublicKey(item.pubkey));
+                          Alert.alert('Unblocked', 'Contact unblocked. You can now accept invitations from them.');
+                        } catch (error: any) {
+                          Alert.alert('Error', error.message);
+                        }
                       },
-                    ]
-                  );
-                }}
-                textColor={theme.colors.textSecondary}
-              />
-            </View>
-            {item.unread > 0 && (
-              <Badge style={styles.badge}>{item.unread}</Badge>
-            )}
-          </View>
-        )}
-        style={styles.contactItem}
-      />
+                    },
+                  ]
+                );
+              }}
+            >
+              Unblock
+            </Button>
+          )}
+          style={styles.contactItem}
+        />
+      );
+    }
+
+    // Accepted - normal contact with long-press menu
+    return (
+      <Menu
+        visible={menuVisible === item.id}
+        onDismiss={() => setMenuVisible(null)}
+        anchor={
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Chat', { contact: item })}
+            onLongPress={() => setMenuVisible(item.id)}
+          >
+            <List.Item
+              title={item.displayName || truncateAddress(item.pubkey, 4)}
+              description={item.lastMessage}
+              left={(props) => (
+                <Avatar.Text
+                  {...props}
+                  size={48}
+                  label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+                  style={{ backgroundColor: theme.colors.primary }}
+                />
+              )}
+              right={(props) => (
+                <View style={styles.rightContainer}>
+                  <Text style={styles.timestamp}>{item.timestamp}</Text>
+                  {item.unread > 0 && (
+                    <Badge style={styles.badge}>{item.unread}</Badge>
+                  )}
+                </View>
+              )}
+              style={styles.contactItem}
+            />
+          </TouchableOpacity>
+        }
+      >
+        <Menu.Item
+          onPress={async () => {
+            setMenuVisible(null);
+            Alert.alert(
+              'Delete Contact',
+              `Remove ${item.displayName || truncateAddress(item.pubkey, 4)} from your contacts? You can re-add them later.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await messenger.rejectInvitation(new PublicKey(item.pubkey));
+                      Alert.alert('Deleted', 'Contact removed');
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message);
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+          title="Delete Contact"
+        />
+        <Menu.Item
+          onPress={async () => {
+            setMenuVisible(null);
+            Alert.alert(
+              'Block Contact',
+              `Block ${item.displayName || truncateAddress(item.pubkey, 4)}? They won't be able to contact you until unblocked.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Block',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await messenger.blockContact(new PublicKey(item.pubkey));
+                      Alert.alert('Blocked', 'Contact blocked. You can unblock them later.');
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message);
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+          title="Block Contact"
+        />
+      </Menu>
     );
   };
 
