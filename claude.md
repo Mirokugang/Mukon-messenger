@@ -76,12 +76,13 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 1. ✅ ~~Test messaging between wallets~~ - WORKING!
 2. ✅ ~~Add contact blocking/unblocking~~ - COMPLETE!
 3. ✅ ~~Add message deletion~~ - COMPLETE!
-4. Test block/unblock/delete flows thoroughly
-5. Add block/unblock UI buttons in ContactsScreen
-6. Add wallet connection persistence (AsyncStorage)
-7. Add backend message persistence (SQLite or Redis)
-8. Polish UI/UX (loading states, error messages)
-9. Add .sol/.skr domain name resolution for contacts
+4. ✅ ~~Add block/unblock UI buttons~~ - COMPLETE!
+5. ✅ ~~Add Telegram-style sidebar navigation~~ - COMPLETE!
+6. Test block/unblock/delete flows thoroughly
+7. Add wallet connection persistence (AsyncStorage)
+8. Add backend message persistence (SQLite or Redis)
+9. Polish UI/UX (loading states, error messages)
+10. Add .sol/.skr domain name resolution for contacts
 
 ## What We're Building
 
@@ -523,6 +524,66 @@ socket.on('delete_message', ({ conversationId, messageId, deleteForBoth }) => {
 - **Mutable blocking:** Users can unblock (Blocked → Rejected), then re-invite if desired
 
 **Status:** ✅ Full contact management + message deletion working! Ready for testing.
+
+### ✅ NEW: Telegram-Style Sidebar Navigation (Jan 20 Night)
+
+**Problem:** Need proper app navigation structure. Decided between WhatsApp (tabs + 3 dots), Signal (minimalist), or Telegram (sidebar).
+
+**Decision: Full Telegram Style**
+
+**Why Telegram for crypto:**
+- Power users expect feature-rich apps (like crypto wallets/DEXs)
+- Wallet integration needs prominence (profile = wallet = identity)
+- Lots of future features need a home (NFT gallery, send tokens, .sol domains)
+- Contacts deserve dedicated space (verified wallets are valuable in crypto)
+- Sidebar becomes "crypto command center"
+
+**Implementation:**
+
+1. **Installed @react-navigation/drawer:**
+   - Added drawer navigation with react-native-gesture-handler
+   - Nested Stack navigator inside Drawer (modal screens like Chat, AddContact, Profile)
+
+2. **Created CustomDrawer component (app/src/components/CustomDrawer.tsx):**
+   ```typescript
+   // Profile section at top
+   - Avatar icon
+   - Wallet address (truncated)
+   - Tap to open full profile
+
+   // Navigation items
+   - Chats (main screen)
+   - Contacts
+   - Saved Messages (placeholder)
+   - Settings (placeholder)
+   - Invite Friends (placeholder)
+   ```
+
+3. **Updated navigation structure (App.tsx):**
+   - Main: DrawerNavigator (with hamburger menu)
+   - Nested: StackNavigator for modal screens
+   - GestureHandlerRootView wrapper for drawer gestures
+
+4. **UI Updates:**
+   - Removed profile FAB from ContactsScreen (now in drawer)
+   - Hamburger icon in top-left opens drawer
+   - Drawer slides from left (Telegram-style)
+   - Dark theme matching Mukon brand
+
+**Files Changed:**
+- Created: `app/src/components/CustomDrawer.tsx`
+- Updated: `app/App.tsx` (drawer navigation structure)
+- Updated: `app/src/screens/ContactsScreen.tsx` (removed profile FAB)
+- Updated: `package.json` (@react-navigation/drawer added)
+
+**Future Sidebar Additions:**
+- NFT Gallery
+- Send Tokens
+- .sol Domain Manager
+- Transaction History
+- Wallet Settings
+
+**Status:** ✅ Telegram-style sidebar implemented! Ready for testing.
 
 ## Testing Guidelines
 
