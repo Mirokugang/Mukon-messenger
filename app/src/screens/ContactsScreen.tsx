@@ -340,13 +340,6 @@ export default function ContactsScreen({ navigation }: any) {
         onPress={() => navigation.navigate('AddContact')}
         color={theme.colors.onPrimary}
       />
-      <FAB
-        icon="account"
-        style={styles.profileFab}
-        onPress={() => navigation.navigate('Profile')}
-        color={theme.colors.onPrimary}
-        small
-      />
     </View>
   );
 }
@@ -391,12 +384,6 @@ const styles = StyleSheet.create({
     right: 16,
     bottom: 16,
     backgroundColor: theme.colors.primary,
-  },
-  profileFab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 88,
-    backgroundColor: theme.colors.secondary,
   },
   registrationContainer: {
     flex: 1,

@@ -1,7 +1,9 @@
 import React from 'react';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
+import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Provider as PaperProvider } from 'react-native-paper';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { theme } from './src/theme';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
@@ -11,8 +13,10 @@ import ContactsScreen from './src/screens/ContactsScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import AddContactScreen from './src/screens/AddContactScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import CustomDrawer from './src/components/CustomDrawer';
 
 const Stack = createStackNavigator();
+const Drawer = createDrawerNavigator();
 
 const navTheme = {
   ...DarkTheme,
@@ -26,6 +30,33 @@ const navTheme = {
   },
 };
 
+function DrawerNavigatorScreens() {
+  return (
+    <Drawer.Navigator
+      drawerContent={(props) => <CustomDrawer {...props} />}
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: theme.colors.surface,
+        },
+        headerTintColor: theme.colors.textPrimary,
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
+        drawerStyle: {
+          backgroundColor: theme.colors.background,
+          width: 280,
+        },
+      }}
+    >
+      <Drawer.Screen
+        name="Contacts"
+        component={ContactsScreen}
+        options={{ title: 'Mukon Messenger' }}
+      />
+    </Drawer.Navigator>
+  );
+}
+
 function AppNavigator() {
   const wallet = useWallet();
 
@@ -38,48 +69,50 @@ function AppNavigator() {
       <NavigationContainer theme={navTheme}>
         <StatusBar style="light" />
         <Stack.Navigator
-        screenOptions={{
-          headerStyle: {
-            backgroundColor: theme.colors.surface,
-          },
-          headerTintColor: theme.colors.textPrimary,
-          headerTitleStyle: {
-            fontWeight: 'bold',
-          },
-        }}
-      >
-        <Stack.Screen
-          name="Contacts"
-          component={ContactsScreen}
-          options={{ title: 'Mukon Messenger' }}
-        />
-        <Stack.Screen
-          name="Chat"
-          component={ChatScreen}
-          options={{ headerBackTitleVisible: false }}
-        />
-        <Stack.Screen
-          name="AddContact"
-          component={AddContactScreen}
-          options={{ title: 'Add Contact' }}
-        />
-        <Stack.Screen
-          name="Profile"
-          component={ProfileScreen}
-          options={{ title: 'Profile' }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: theme.colors.surface,
+            },
+            headerTintColor: theme.colors.textPrimary,
+            headerTitleStyle: {
+              fontWeight: 'bold',
+            },
+          }}
+        >
+          <Stack.Screen
+            name="Main"
+            component={DrawerNavigatorScreens}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="Chat"
+            component={ChatScreen}
+            options={{ headerBackTitleVisible: false }}
+          />
+          <Stack.Screen
+            name="AddContact"
+            component={AddContactScreen}
+            options={{ title: 'Add Contact' }}
+          />
+          <Stack.Screen
+            name="Profile"
+            component={ProfileScreen}
+            options={{ title: 'Profile' }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
     </MessengerProvider>
   );
 }
 
 export default function App() {
   return (
-    <WalletProvider>
-      <PaperProvider theme={theme}>
-        <AppNavigator />
-      </PaperProvider>
-    </WalletProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <WalletProvider>
+        <PaperProvider theme={theme}>
+          <AppNavigator />
+        </PaperProvider>
+      </WalletProvider>
+    </GestureHandlerRootView>
   );
 }
