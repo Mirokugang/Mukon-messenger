@@ -13,6 +13,7 @@ export default function ChatScreen({ route, navigation }: any) {
   const [message, setMessage] = React.useState('');
   const wallet = useWallet();
   const messenger = useMessenger();
+  const flatListRef = React.useRef<FlatList>(null);
 
   // Get conversation ID from the two public keys
   const conversationId = React.useMemo(() => {
@@ -130,10 +131,13 @@ export default function ChatScreen({ route, navigation }: any) {
       keyboardVerticalOffset={90}
     >
       <FlatList
+        ref={flatListRef}
         data={messages}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.messagesList}
+        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
       />
       <View style={styles.inputContainer}>
         <TextInput

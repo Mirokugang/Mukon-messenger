@@ -146,13 +146,19 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       console.log('✅ Connected to backend');
 
       try {
-        const message = `Authenticate ${newSocket.id}`;
-        const signature = await wallet.signMessage!(Buffer.from(message, 'utf8'));
+        // Reuse encryption signature for socket authentication (no new popup!)
+        const encryptionSig = (window as any).__mukonEncryptionSignature;
+        if (!encryptionSig) {
+          console.error('❌ No encryption signature available for socket auth');
+          return;
+        }
 
+        // Use encryption signature as authentication proof
         newSocket.emit('authenticate', {
           publicKey: wallet.publicKey!.toBase58(),
-          signature: bs58.encode(signature),
+          signature: bs58.encode(encryptionSig),
         });
+        console.log('🔐 Socket authenticated with cached signature (no popup)');
       } catch (error) {
         console.error('❌ Failed to authenticate:', error);
       }
