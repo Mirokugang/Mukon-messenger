@@ -134,13 +134,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
     const newSocket = io(BACKEND_URL, {
       path: '/socket.io',
-      transports: ['polling', 'websocket'],
-      reconnectionAttempts: 3,
+      transports: ['websocket', 'polling'], // Match backend order
+      reconnectionAttempts: 5,
       reconnectionDelay: 1000,
-      timeout: 20000,
+      timeout: 30000, // Increase timeout for physical device
       forceNew: true,
-      upgrade: false,
-      rememberUpgrade: false,
+      autoConnect: true,
     });
 
     newSocket.on('connect', async () => {

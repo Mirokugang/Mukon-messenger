@@ -235,3 +235,48 @@ export async function buildTransaction(
   // Create versioned transaction
   return new VersionedTransaction(message);
 }
+
+// Deserialization helpers
+export interface Peer {
+  pubkey: PublicKey;
+  status: 'Invited' | 'Requested' | 'Accepted' | 'Rejected';
+}
+
+export interface WalletDescriptor {
+  owner: PublicKey;
+  peers: Peer[];
+}
+
+export function deserializeWalletDescriptor(data: Buffer): WalletDescriptor {
+  let offset = 8; // Skip 8-byte discriminator
+
+  // Read owner (32 bytes)
+  const owner = new PublicKey(data.slice(offset, offset + 32));
+  offset += 32;
+
+  // Read peers vector length (4 bytes)
+  const peersLength = data.readUInt32LE(offset);
+  offset += 4;
+
+  // Read each peer
+  const peers: Peer[] = [];
+  for (let i = 0; i < peersLength; i++) {
+    // Read peer pubkey (32 bytes)
+    const pubkey = new PublicKey(data.slice(offset, offset + 32));
+    offset += 32;
+
+    // Read peer state (1 byte)
+    const stateNum = data.readUInt8(offset);
+    offset += 1;
+
+    const status = ['Invited', 'Requested', 'Accepted', 'Rejected'][stateNum] as
+      | 'Invited'
+      | 'Requested'
+      | 'Accepted'
+      | 'Rejected';
+
+    peers.push({ pubkey, status });
+  }
+
+  return { owner, peers };
+}

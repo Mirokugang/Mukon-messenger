@@ -2,21 +2,31 @@
 
 A private, wallet-to-wallet encrypted messenger built for the Solana Privacy Hackathon (Jan 12-30, 2026).
 
-**🚀 Status**: Deployed to Solana devnet and ready for testing!
+**🚀 Status**: MVP Complete! E2E encrypted messaging working. Arcium integration in progress.
+
+**Latest Update (Jan 20, 2026):**
+- ✅ Working E2E encrypted messenger with MessengerContext architecture
+- ✅ ONE socket instance, shared encryption keys, centralized state
+- ✅ Fixed critical decryption bug (both wallets can decrypt messages)
+- ⏳ Arcium v0.6.3 integration ready to implement (circuits built, waiting for program integration)
 
 ## Quick Start
 
+**Prerequisites:** You need a physical Android device with ADB or Wi-Fi debugging enabled.
+
 ```bash
-# 1. Start backend
-cd backend && node src/index.js &
+# 1. Start backend (on host machine)
+cd backend && node src/index.js
 
-# 2. Launch mobile app
-cd app && npx expo start
+# 2. Start Metro bundler (in new terminal)
+cd app && npm start
 
-# 3. Test on device (press 'i' for iOS or 'a' for Android)
+# 3. Install on device
+# The app is a debug build, not Expo Go!
+# Use ADB to install or rebuild with: npx expo run:android
 ```
 
-See [E2E_TEST_GUIDE.md](./E2E_TEST_GUIDE.md) for complete testing instructions.
+**Important:** This is a native debug build, NOT Expo Go. Backend runs on host IP `10.206.4.164:3001` for physical device connection.
 
 ## Overview
 
@@ -65,7 +75,11 @@ mukon-messenger/
 - `accept()` - Accept invitation
 - `reject()` - Reject invitation
 
-**Status:** ✅ Deployed to devnet (Program ID: 89MdH36FUjSYaZ47VAtPD21THprGpKkta8Qd26wGvnBr)
+**Status:** ✅ Deployed to devnet (Program ID: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`)
+
+**Latest Changes (Jan 20):**
+- New program deployed with encryption keys from day 1
+- All old accounts wiped (fresh start with proper architecture)
 
 ### 2. Message Backend (Express + Socket.IO)
 
@@ -88,7 +102,7 @@ mukon-messenger/
 - `send_message` - Send encrypted message
 - `new_message` - Receive new messages
 
-**Status:** ✅ Running on http://localhost:3001
+**Status:** ✅ Running on http://10.206.4.164:3001 (host IP for physical device testing)
 
 ### 3. React Native App (Expo)
 
@@ -101,8 +115,10 @@ mukon-messenger/
 - `ProfileScreen` - User profile and settings
 
 **Key Files:**
-- `src/hooks/useMukonMessenger.ts` - Main hook for Solana program interaction
-- `src/utils/encryption.ts` - E2E encryption utilities (TweetNaCl)
+- `src/contexts/MessengerContext.tsx` - **NEW!** Centralized messenger logic (socket, encryption, state)
+- `src/contexts/WalletContext.tsx` - Wallet connection via MWA
+- `src/utils/transactions.ts` - Manual transaction builders (no Anchor SDK in app)
+- `src/utils/encryption.ts` - E2E encryption utilities (NaCl box)
 - `src/theme.ts` - Dark mode Mukon brand colors
 
 **Design:**
@@ -111,7 +127,14 @@ mukon-messenger/
 - Green secondary (#22C55E)
 - Clean, minimal UI inspired by LINE/WeChat
 
-**Status:** ✅ Fully integrated and ready (1,316 dependencies installed)
+**Status:** ✅ Fully functional with MessengerContext architecture (1,316 dependencies installed)
+
+**Architecture Improvements (Jan 20):**
+- ONE socket instance for entire app (was: one per screen)
+- ONE authentication flow (was: constant wallet prompts)
+- Shared encryption keys across all components
+- Centralized message state with deduplication
+- Fixed critical decryption bug (correct recipient determination)
 
 ## Running the Project
 
@@ -225,19 +248,29 @@ const encrypted = nacl.box(
 
 ## Arcium Integration Status
 
-**Current Status:** ✅ Encrypted circuits built successfully
+**Current Status (Jan 20, 2026):** ⚠️ Circuits built, program integration in progress
 
-**Compiled Instructions:**
-- `is_accepted_contact` - Private contact verification (13.9B ACUs)
-- `count_accepted` - Count accepted contacts privately (2.2B ACUs)
-- `add_two_numbers` - Demo instruction (485M ACUs)
+**What's Ready:**
+- ✅ Encrypted circuits compiled (3 instructions)
+  - `is_accepted_contact` - Private contact verification (13.9B ACUs)
+  - `count_accepted` - Count accepted contacts privately (2.2B ACUs)
+  - `add_two_numbers` - Demo instruction (485M ACUs)
+- ✅ Program has `#[arcium_program]` macro
+- ✅ Dependencies compatible with v0.6.3
 
-**Architecture:**
-- Fixed-size contact list (MAX_CONTACTS=100) for MPC compatibility
-- Constant-time operations for privacy preservation
-- Ready for full Anchor program integration
+**What's Next:**
+- [ ] Upgrade to Arcium v0.6.3 (officially released Jan 20!)
+- [ ] Integrate comp_def initialization into program
+- [ ] Add queue_computation calls for encrypted operations
+- [ ] Deploy computation definitions to devnet
+- [ ] Test private contact verification E2E
 
-See [ARCIUM_STATUS.md](./ARCIUM_STATUS.md) for detailed integration status.
+**Why This Matters:**
+Without Arcium, contact lists are visible on-chain. With Arcium, you can prove "Alice is my contact" without revealing your other contacts. Maximum privacy! 🔒
+
+**Timeline:** Integrating this week for hackathon submission (due Jan 30).
+
+See [ARCIUM_STATUS.md](./ARCIUM_STATUS.md) for detailed migration guide and integration steps.
 
 ## Bounty Targets
 
@@ -248,24 +281,43 @@ See [ARCIUM_STATUS.md](./ARCIUM_STATUS.md) for detailed integration status.
 
 ## Development Notes
 
-### What's Working
-✅ Anchor program deployed to devnet
-✅ All tests passing (7/7)
-✅ WebSocket backend running
-✅ React Native app fully integrated with Anchor
-✅ E2E encryption with TweetNaCl
+### What's Working (Jan 20, 2026)
+✅ E2E encrypted messaging (both wallets can decrypt)
+✅ MessengerContext architecture (ONE socket, shared state)
+✅ Solana program deployed to devnet
+✅ Mobile Wallet Adapter integration
+✅ Manual transaction construction (React Native compatible)
+✅ Contact invitation/accept/reject flow
+✅ Real-time message delivery via Socket.IO
+✅ Message persistence (loads from backend on mount)
+✅ Duplicate message detection
+✅ NaCl box asymmetric encryption
 ✅ Dark mode UI with Mukon branding
 ✅ Arcium encrypted circuits compiled
-✅ Dev wallet for testing
+
+### Critical Issues Fixed (Jan 20)
+✅ Multiple socket instances → ONE shared socket
+✅ Constant wallet prompts → ONE authentication
+✅ Second wallet decryption failure → Fixed recipient determination
+✅ Duplicate messages → Proper deduplication by (encrypted+nonce+sender)
 
 ### What's TODO
-- [ ] E2E user flow testing (register → invite → chat)
-- [ ] Full Arcium integration into Anchor program
-- [ ] Replace dev wallet with production wallet adapter
-- [ ] Message persistence (Redis/PostgreSQL)
+**High Priority (This Week):**
+- [ ] Integrate Arcium v0.6.3 into program
+- [ ] Deploy computation definitions to devnet
+- [ ] Test encrypted contact verification E2E
+
+**Medium Priority:**
+- [ ] Add wallet connection persistence (AsyncStorage)
+- [ ] Backend message persistence (SQLite/Redis)
+- [ ] Polish UI/UX (chat bubbles, timestamps, scroll behavior)
+- [ ] Add .sol/.skr domain name resolution
+
+**Nice to Have:**
 - [ ] Push notifications
 - [ ] QR code scanner for adding contacts
-- [ ] Deploy to mainnet
+- [ ] Group chats
+- [ ] Deploy to mainnet (after hackathon)
 
 ## Tech Stack
 

@@ -134,7 +134,6 @@ export default function ChatScreen({ route, navigation }: any) {
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.messagesList}
-        inverted
       />
       <View style={styles.inputContainer}>
         <TextInput

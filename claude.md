@@ -21,7 +21,7 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 **What's Deployed:**
 - NEW Solana program on devnet: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
 - Program includes: register (with encryption key), invite, accept, reject, update_profile
-- Backend WebSocket server running on 192.168.1.33:3001 (host IP for physical device)
+- Backend WebSocket server running on 10.206.4.164:3001 (host IP for physical device)
 
 **What's Working:**
 - ✅ Solana Mobile Wallet Adapter (MWA) integration
@@ -63,11 +63,12 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 **Known Issues to Fix (Priority Order):**
 1. **Too many wallet verification prompts** - ✅ FIXED with MessengerContext (Jan 20)
 2. **Second wallet decryption problems** - ✅ FIXED with correct recipient determination (Jan 20)
-3. **No wallet connection persistence** - Closing/reopening app requires full reconnect (TODO)
-4. Backend only stores messages in memory - Need SQLite/Redis for persistence (TODO)
+3. **Socket.IO connection timeout** - ✅ FIXED with transport order matching backend (Jan 20)
+4. **No wallet connection persistence** - Closing/reopening app requires full reconnect (TODO)
+5. Backend only stores messages in memory - Need SQLite/Redis for persistence (TODO)
 
 **Next Steps:**
-1. Test MessengerContext refactor thoroughly
+1. Test messaging between wallets with fixed Socket.IO config
 2. Add wallet connection persistence (AsyncStorage)
 3. Add backend message persistence (SQLite or Redis)
 4. Polish UI/UX (chat bubbles, timestamps, scroll behavior)
@@ -84,306 +85,102 @@ A 1:1 encrypted messenger (like Line/WeChat DMs) where:
 
 ## Technical Architecture
 
+### Current Architecture (MVP - Jan 20, 2026)
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    CLIENT (React Native)                    │
-│  - Wallet adapter (Phantom/Solflare)                        │
-│  - E2E encryption (TweetNaCl)                               │
+│  - Solana Mobile Wallet Adapter (MWA)                       │
+│  - E2E encryption (NaCl box - asymmetric)                   │
+│  - MessengerContext (centralized socket/state)              │
 │  - Chat UI                                                  │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │               SOLANA PROGRAM (Anchor + Arcium)              │
+│  Program ID: DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv  │
 │                                                             │
 │  Accounts:                                                  │
-│  ├── UserProfile (encrypted display name, avatar)           │
-│  ├── ContactList (encrypted list of contacts)               │
-│  └── ConversationMeta (encrypted participant list)          │
+│  ├── UserProfile (display name, avatar, encryption pubkey)  │
+│  ├── WalletDescriptor (peer relationships)                  │
+│  └── Conversation (metadata, participants)                  │
 │                                                             │
 │  Instructions:                                              │
-│  ├── register() - Create user profile                       │
+│  ├── register() - Create user profile + encryption key      │
 │  ├── invite(peer) - Send contact request                    │
 │  ├── accept(peer) - Accept request, create conversation     │
 │  ├── reject(peer) - Reject request                          │
-│  └── update_profile() - Update encrypted profile            │
+│  └── update_profile() - Update profile                      │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  MESSAGE BACKEND (Simple)                   │
-│  - WebSocket server for real-time                           │
+│                  MESSAGE BACKEND (WebSocket)                │
+│  - Socket.IO for real-time delivery                         │
 │  - Store encrypted message blobs                            │
-│  - Authenticate via wallet signature                        │
+│  - Wallet signature authentication                          │
+│  - Running on 10.206.4.164:3001                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Phase 1: Fork & Understand STEM Proto
-
-First, clone and understand the STEM Proto (Cherry.fun) codebase:
-
-```bash
-git clone https://github.com/cherrydotfun/stem-proto.git
-cd stem-proto
+### Target Architecture (With Full Arcium - Hackathon Submission)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 LAYER 3: CLIENT (End-to-End)                │
+├─────────────────────────────────────────────────────────────┤
+│  - NaCl box encryption (message content)                    │
+│  - Arcium MPC queries (encrypted contact list access)       │
+│  - Zero-knowledge proofs (relationship verification)        │
+│  - Local metadata decryption only                           │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│              LAYER 2: OFF-CHAIN (Relay Nodes)               │
+├─────────────────────────────────────────────────────────────┤
+│  What relay sees:                                           │
+│  ├── Encrypted message blob (can't read)                    │
+│  ├── Destination: [ENCRYPTED PUBKEY or anonymous ID]        │
+│  └── Timestamp (ordering only)                              │
+│                                                             │
+│  → Relay can't see sender/recipient identities              │
+│  → Relay can't correlate conversations                      │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│           LAYER 1: ON-CHAIN (Arcium MPC Encryption)         │
+├─────────────────────────────────────────────────────────────┤
+│  Encrypted with Arcium:                                     │
+│  ├── Contact lists (who you talk to)                        │
+│  ├── Conversation existence (that a chat exists)            │
+│  ├── Message pointers (off-chain blob references)           │
+│  ├── User profiles (display names, avatars)                 │
+│  └── Social graph (entire relationship network)             │
+│                                                             │
+│  → Even developers can't see who talks to whom              │
+│  → On-chain observers only see encrypted blobs              │
+│  → MPC proves relationships without revealing data          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Key files to study:**
-- `programs/cherry-chat/src/lib.rs` - The Anchor program
-- `app/src/composables/` - Vue composables for Stem integration
-- `tests/` - Integration tests
+**Privacy Goals:**
+- 🔒 Message content encrypted (E2E with NaCl)
+- 🔒 Contact lists encrypted (Arcium MPC)
+- 🔒 Social graph encrypted (Arcium MPC)
+- 🔒 Conversation metadata encrypted (Arcium MPC)
+- 🔒 Message routing anonymized (encrypted destination IDs)
+- 🔒 Relay nodes can't correlate conversations
+- 🔒 On-chain observers can't map social networks
+- 🔒 Zero-knowledge relationship proofs
 
-**STEM Proto's architecture:**
-```rust
-// WalletDescriptor - stores peer relationships
-pub struct WalletDescriptor {
-    pub owner: Pubkey,
-    pub peers: Vec<PeerStatus>, // Invited, Requested, Accepted, Rejected
-}
+**Attack Resistance:**
+- Traffic analysis attacks → Blocked (anonymous routing)
+- Social graph mapping → Blocked (Arcium encryption)
+- Metadata leakage → Minimized (only existence of activity visible)
+- Network analysis → Blocked (encrypted on-chain data)
 
-// PrivateChat - stores messages between two users
-pub struct PrivateChat {
-    pub chat_hash: [u8; 32],  // Deterministic hash of sorted pubkeys
-    pub participants: [Pubkey; 2],
-    pub messages: Vec<Message>,
-}
-
-// Instructions
-pub fn register() -> Result<()>           // Create WalletDescriptor
-pub fn invite(invitee: Pubkey) -> Result<()>  // Send invitation
-pub fn accept(hash: [u8; 32]) -> Result<()>   // Accept & create chat
-pub fn reject(peer: Pubkey) -> Result<()>     // Reject invitation
-pub fn sendmessage(hash: [u8; 32], content: String) -> Result<()>
-```
-
-## Phase 2: Add Arcium Encryption
-
-This is the hackathon differentiator. We'll use Arcium to encrypt:
-1. Contact lists (who you're talking to is private)
-2. Conversation metadata (participants hidden)
-3. User profiles (display name, avatar encrypted)
-
-**Arcium Integration Pattern:**
-
-```rust
-// In encrypted-ixs/contact_list.rs
-use arcis_imports::*;
-
-#[encrypted]
-mod circuits {
-    use arcis_imports::*;
-
-    pub struct ContactListInput {
-        contacts: Vec<Pubkey>,
-        new_contact: Pubkey,
-    }
-
-    #[instruction]
-    pub fn add_contact(input: Enc<Shared, ContactListInput>) -> Enc<Shared, Vec<Pubkey>> {
-        let data = input.to_arcis();
-        let mut contacts = data.contacts;
-        contacts.push(data.new_contact);
-        input.owner.from_arcis(contacts)
-    }
-}
-
-// In the Solana program (programs/mukon-messenger/src/lib.rs)
-use anchor_lang::prelude::*;
-use arcium_anchor::prelude::*;
-
-const COMP_DEF_OFFSET_ADD_CONTACT: u32 = comp_def_offset("add_contact");
-
-#[arcium_program]
-pub mod mukon_messenger {
-    use super::*;
-
-    pub fn init_add_contact_comp_def(ctx: Context<InitAddContactCompDef>) -> Result<()> {
-        init_comp_def(ctx.accounts, 0, None, None)?;
-        Ok(())
-    }
-
-    pub fn add_contact(
-        ctx: Context<AddContact>,
-        computation_offset: u64,
-        encrypted_contact_list: Vec<u8>,
-        new_contact_pubkey: Pubkey,
-        pub_key: [u8; 32],
-        nonce: u128,
-    ) -> Result<()> {
-        // Queue computation with Arcium
-        queue_computation(ctx.accounts, computation_offset, args, ...)?;
-        Ok(())
-    }
-}
-```
-
-## Phase 3: Build React Native Client
-
-Port the patterns from solchat-mobile but connect to our new program:
-
-```typescript
-// src/hooks/useMukonMessenger.ts
-import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { Program } from '@coral-xyz/anchor';
-import { ArciumCipher, getArciumEnv } from '@arcium-hq/client';
-import nacl from 'tweetnacl';
-
-export function useMukonMessenger() {
-    const { connection } = useConnection();
-    const { publicKey, signMessage } = useWallet();
-
-    // Initialize Arcium cipher for encrypted operations
-    const cipher = useMemo(() => {
-        if (!publicKey) return null;
-        return new ArciumCipher(getArciumEnv());
-    }, [publicKey]);
-
-    // Register new user
-    const register = async (displayName: string) => {
-        // Encrypt display name with Arcium
-        const encryptedName = cipher.encrypt([displayName]);
-
-        // Call program
-        await program.methods
-            .register(encryptedName)
-            .accounts({...})
-            .rpc();
-    };
-
-    // Send contact invitation
-    const invite = async (peerPubkey: PublicKey) => {
-        await program.methods
-            .invite(peerPubkey)
-            .accounts({...})
-            .rpc();
-    };
-
-    // Send message (off-chain, E2E encrypted)
-    const sendMessage = async (conversationId: string, content: string) => {
-        // Get recipient's public key
-        const recipientPubkey = await getRecipientKey(conversationId);
-
-        // Generate shared secret via ECDH
-        const sharedSecret = nacl.box.before(recipientPubkey, mySecretKey);
-
-        // Encrypt message
-        const nonce = nacl.randomBytes(24);
-        const encrypted = nacl.box.after(
-            Buffer.from(content),
-            nonce,
-            sharedSecret
-        );
-
-        // Send to backend
-        await api.sendMessage({
-            conversationId,
-            encrypted: Buffer.from(encrypted).toString('base64'),
-            nonce: Buffer.from(nonce).toString('base64'),
-        });
-    };
-
-    return { register, invite, sendMessage, ... };
-}
-```
-
-## UI/UX Design Direction
-
-### Design References
-
-- **Primary inspiration:** LINE, WeChat, Telegram DM screens (clean, minimal, fast)
-- **Code reference:** https://github.com/Mirokugang/solchat-mobile (for React Native + Solana patterns, UI component structure)
-- **DO NOT fork solchat** - use it as reference only for UI patterns
-
-### Design Principles
-
-1. **Dark mode first** - Crypto users expect it
-2. **Minimal chrome** - Focus on the conversation
-3. **Wallet-native** - Show wallet addresses elegantly (truncated: 7xKp...3mNq)
-4. **Fast** - Optimistic UI updates, don't wait for chain confirmation for messages
-
-### Color Palette (Mukon brand)
-
-```
-Background:     #0D0D0D (near black)
-Surface:        #1A1A1A (cards, inputs)
-Primary:        #6366F1 (indigo - actions, links)
-Secondary:      #22C55E (green - success, online status)
-Text Primary:   #FFFFFF
-Text Secondary: #9CA3AF (gray-400)
-Accent:         #F59E0B (amber - notifications, warnings)
-```
-
-### Key Screens
-
-#### 1. Contacts Screen (Home)
-```
-┌─────────────────────────────────┐
-│ Mukon Messenger      [+] [⚙️]  │
-├─────────────────────────────────┤
-│ 🔍 Search contacts...           │
-├─────────────────────────────────┤
-│ ┌─────┐                         │
-│ │ NFT │ vitalik.sol             │
-│ │ PFP │ Last message preview... │
-│ └─────┘                    2m   │
-├─────────────────────────────────┤
-│ ┌─────┐                         │
-│ │     │ 7xKp...3mNq             │
-│ │     │ Sent you an invite      │
-│ └─────┘                    1h   │
-└─────────────────────────────────┘
-```
-
-#### 2. Chat Screen
-```
-┌─────────────────────────────────┐
-│ ← vitalik.sol              🔒  │
-├─────────────────────────────────┤
-│                                 │
-│        ┌──────────────┐         │
-│        │ Hey, you free │         │
-│        │ to chat?      │         │
-│        └──────────────┘  10:42  │
-│                                 │
-│  ┌──────────────┐               │
-│  │ Yeah what's  │               │
-│  │ up?          │               │
-│  └──────────────┘  10:43        │
-│                                 │
-├─────────────────────────────────┤
-│ [Message...]            [Send]  │
-└─────────────────────────────────┘
-```
-
-#### 3. Add Contact Screen
-```
-┌─────────────────────────────────┐
-│ ← Add Contact                   │
-├─────────────────────────────────┤
-│                                 │
-│ Enter wallet address or .sol    │
-│ ┌─────────────────────────────┐ │
-│ │ 7xKp...                     │ │
-│ └─────────────────────────────┘ │
-│                                 │
-│ Or scan QR code                 │
-│       ┌───────────┐             │
-│       │ [Camera]  │             │
-│       └───────────┘             │
-│                                 │
-│ ┌─────────────────────────────┐ │
-│ │      Send Invitation        │ │
-│ └─────────────────────────────┘ │
-└─────────────────────────────────┘
-```
-
-### Assets Already Provided
-
-- `icon.png` - App icon (use for app icon and splash)
-- `logo.jpg` - Logo (use in onboarding/about screens)
-
-### Component Library
-
-Use **React Native Paper** or **Tamagui** for base components, then customize to match the color palette.
+**This is MAXIMUM privacy for the hackathon!** 🏆
 
 ## Directory Structure
 
@@ -522,44 +319,6 @@ mod circuits {
 ### Easy: Helius ($5,000)
 - Just use their RPC
 
-## Development Steps
-
-### Day 1-2: Setup
-```bash
-# Install Arcium CLI
-TARGET=x86_64_linux && curl "https://bin.arcium.com/download/arcup_${TARGET}_0.1.47" -o ~/.cargo/bin/arcup && chmod +x ~/.cargo/bin/arcup
-arcup install
-
-# Initialize project
-arcium init mukon-messenger
-cd mukon-messenger
-
-# Also clone STEM Proto for reference
-git clone https://github.com/cherrydotfun/stem-proto.git ../stem-proto-reference
-```
-
-### Day 3-5: Core Program
-1. Port STEM Proto's account structures
-2. Add Arcium encryption to ContactList
-3. Write tests for invite/accept/reject flow
-
-### Day 6-8: Client App
-1. Set up React Native with Expo
-2. Implement wallet connection
-3. Build chat UI
-4. Integrate with program
-
-### Day 9-11: Backend + Polish
-1. Simple Express/WebSocket server for messages
-2. Wallet signature authentication
-3. Message storage and retrieval
-
-### Day 12-14: Demo + Submission
-1. Record 3-minute demo video
-2. Deploy to devnet
-3. Write documentation
-4. Submit to all applicable bounties
-
 ## Testing Checklist
 
 - [ ] User can register with encrypted profile
@@ -578,152 +337,7 @@ git clone https://github.com/cherrydotfun/stem-proto.git ../stem-proto-reference
 - Solana Privacy Hack: https://solana.com/privacyhack
 - TweetNaCl.js: https://github.com/nicktomlin/tweetnacl-js
 
-## Questions to Resolve During Development
-
-1. **Message storage**: Start with simple backend, can migrate to IPFS/Arweave later
-2. **Key management**: Derive encryption keys from wallet signature
-3. **Arcium testnet**: Need to get cluster offset for devnet deployment
-4. **Scope**: 1:1 only for MVP, groups post-hackathon
-
-## Current Status (Jan 19, 2026)
-
-### Development Environment
-
-**IMPORTANT:** Using **debug build** with Metro, NOT Expo Go.
-- Run with: `npx expo start --clear` (or `npm start`)
-- App runs as native debug build on **PHYSICAL DEVICE** (Seeker phone via ADB)
-- **NEVER use emulator** - always testing on real device
-- Never suggest Expo Go commands or running through Expo Go app
-- Changes require Metro restart, not full rebuild (unless native dependencies change)
-
-**Network Configuration for Physical Device:**
-- Backend runs on host machine (Mac) at `0.0.0.0:3001`
-- Physical device connects via USB/ADB or WiFi
-- **NOT using Android emulator `10.0.2.2` address**
-- Need to use host machine's actual IP address on local network
-- Host IP: `192.168.1.33` (check with `ifconfig` if changed)
-
-### ✅ FRESH START - New Program Deployed
-
-**NEW Program ID:** `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
-
-**What Changed:**
-- Deployed COMPLETELY NEW program (not an upgrade)
-- All old accounts (contacts, profiles) are wiped - clean slate
-- No more hacky auto-update code
-- Encryption keys built-in from the start
-
-### ✅ MVP COMPLETE (Jan 20, 2026) - Working E2E Encrypted Messenger!
-
-**Core Features Working:**
-- ✅ Solana program on devnet with encryption from day 1
-- ✅ Program includes: register (with encryption key), invite, accept, reject, update_profile
-- ✅ Backend running on 0.0.0.0:3001 (WebSocket + HTTP)
-- ✅ React Native app with Mobile Wallet Adapter integration
-- ✅ Manual transaction construction (no Anchor SDK in app)
-- ✅ Contact management UI with delete button
-- ✅ **E2E encrypted messaging working!**
-  - NaCl box (asymmetric) encryption
-  - Messages encrypted with recipient's public key + sender's secret key
-  - Backend only sees encrypted blobs (true E2E encryption)
-  - Both users can decrypt messages using conversation partner's encryption public key
-- ✅ Message persistence: Messages load from backend on chat screen mount
-- ✅ Real-time message delivery via Socket.IO
-- ✅ One-time encryption key derivation in same MWA session as wallet connect
-- ✅ Encryption keys persist across screens (stored in global window var)
-- ✅ Duplicate message detection (matches by encrypted+nonce+sender)
-- ✅ Decryption of both incoming and own messages from backend history
-
-### Architecture Decisions
-- **New program = fresh start**: Generated new keypair, no old accounts carry over
-- **Encryption keys are deterministic**: Same wallet signature = same keypair forever
-- **Public keys stored on-chain**: In UserProfile during registration
-- **Asymmetric encryption**: NaCl box (not secretbox) for peer-to-peer messaging
-- **Messages stored off-chain**: Backend holds encrypted message blobs, only metadata on-chain
-
-### Testing Flow (BOTH WALLETS MUST RE-REGISTER)
-1. **Restart metro** with cache clear: `npm start -- --reset-cache`
-2. **Both wallets register** - encryption keys will be generated and stored properly
-3. **Add contacts** - both users send/accept invitations
-4. **Send encrypted messages** - should work cleanly now
-
-### 🔧 Known Issues to Fix (Priority Order)
-
-**CRITICAL - Authentication/UX:**
-1. **Too many wallet verification prompts**
-   - Connect wallet on login
-   - Verify again to get past register page
-   - Verify when opening chat screen
-   - Verify to add contact
-   - **Root cause:** Multiple `useMukonMessenger` instances (one per screen)
-   - **Each screen:** Creates new socket, tries to authenticate separately
-   - **Solution needed:** Lift `useMukonMessenger` to Context provider (ONE instance, ONE socket)
-
-2. **No wallet connection persistence**
-   - Closing/reopening app requires full wallet reconnect
-   - Should persist wallet connection state in AsyncStorage
-   - Need to store: publicKey, auth token, encryption signature
-   - On app reopen: Check storage → auto-reconnect if available
-
-3. **Messages not broadcasting to all connected clients**
-   - Wallet A sends message → appears in Wallet A's chat
-   - Wallet B doesn't receive message in real-time
-   - **Likely cause:** Multiple socket instances, wrong room management, or backend broadcast issue
-   - **Need to investigate:** Backend logs, socket room membership, message relay logic
-
-**Architecture Issues:**
-4. **Multiple socket connections per wallet**
-   - ContactsScreen creates socket instance
-   - ChatScreen creates another socket instance
-   - AddContactScreen creates another socket instance
-   - **Result:** 3+ sockets per wallet, duplicate authentications, wasted resources
-   - **Solution:** Context provider for ONE shared socket
-
-5. **Encryption signature stored in global window variable**
-   - Hacky solution to share signature across screen instances
-   - Should be in proper React Context
-   - Works but not clean architecture
-
-**Backend:**
-6. **Backend only stores messages in memory**
-   - Restarting backend loses all message history
-   - Need to add simple persistence (SQLite or Redis)
-   - Low priority for MVP but needed for demo stability
-
-### 🎯 Next Steps (In Priority Order)
-
-**Phase 1: Fix Critical Architecture Issues**
-1. **Create MessengerContext provider**
-   - Move `useMukonMessenger` logic to Context
-   - ONE socket instance shared across all screens
-   - Eliminates duplicate authentications
-   - Reduces wallet prompts drastically
-
-2. **Fix message broadcasting**
-   - Debug why messages don't reach other wallet in real-time
-   - Check backend socket room management
-   - Verify io.to(conversationId).emit() is broadcasting correctly
-
-3. **Add wallet persistence**
-   - Store wallet connection in AsyncStorage
-   - Auto-reconnect on app reopen
-   - Store encryption signature for session restoration
-
-**Phase 2: UI/UX Improvements** (After architecture is solid)
-- Polish chat UI (bubbles, timestamps, scroll to bottom)
-- Add loading states
-- Better error handling and user feedback
-- Display name support (currently just addresses)
-- Profile pictures (avatar URLs)
-
-**Phase 3: Hackathon Polish**
-- Demo video recording
-- Documentation for judges
-- Deploy backend to cloud (currently localhost)
-- Test on multiple physical devices simultaneously
-- Submission materials
-
-### CRITICAL UX FEATURE: Invite Unregistered Users
+## CRITICAL UX FEATURE: Invite Unregistered Users
 
 **Problem:** Every social app needs to let users invite friends who haven't joined yet. Requiring both users to register first is terrible UX.
 
@@ -806,7 +420,7 @@ const recipientPubkey = isMe
 
 **Problem:** App was using emulator address `http://10.0.2.2:3001` which doesn't work for physical device over ADB/WiFi.
 
-**Solution:** Changed to actual host machine IP: `http://192.168.1.33:3001` in MessengerContext.
+**Solution:** Changed to actual host machine IP: `http://10.206.4.164:3001` in MessengerContext.
 
 ### Current Message Flow (Working as of Jan 20):
 
@@ -819,6 +433,101 @@ const recipientPubkey = isMe
 7. Both sender and recipient can view message history (properly encrypted/decrypted)
 
 **Status:** ✅ E2E encrypted messaging working end-to-end!
+
+## Testing Guidelines
+
+### Manual E2E Testing Flow
+
+**Prerequisites:**
+- Both wallets must register on the NEW program (DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv)
+- Backend running on 10.206.4.164:3001
+- Metro running with cache clear: `npm start -- --reset-cache`
+
+**Test Flow (Two Physical Devices):**
+1. **Device 1 (Wallet A):**
+   - Connect wallet → derives encryption keys once
+   - Register user (encryption public key stored on-chain)
+   - Copy wallet address
+
+2. **Device 2 (Wallet B):**
+   - Connect wallet → derives encryption keys
+   - Register user
+   - Copy wallet address
+
+3. **Device 1 sends invitation:**
+   - Add contact with Wallet B's address
+   - Send invitation (on-chain tx)
+
+4. **Device 2 accepts:**
+   - See invitation from Wallet A
+   - Accept invitation (on-chain tx)
+
+5. **Exchange messages:**
+   - Device 1: Send "Hey from A!"
+   - Device 2: Receives encrypted message, decrypts correctly
+   - Device 2: Send "Hey from B!"
+   - Device 1: Receives and decrypts correctly
+
+**Success Criteria:**
+- Both wallets can send and receive messages
+- Messages decrypt correctly on both ends
+- No duplicate messages
+- No constant wallet prompts
+- Messages persist after leaving/re-entering chat
+
+### Performance Expectations
+- **Registration:** ~2-3 seconds (on-chain tx)
+- **Invitation/Accept:** ~2-3 seconds (on-chain tx)
+- **Message send:** <100ms (WebSocket)
+- **Message receive:** Real-time (<50ms)
+
+## Hackathon Submission Checklist
+
+**CRITICAL - Before Final Submission:**
+- [ ] **Remove CLAUDE.md** from repository (or add to .gitignore on submission branch)
+  - **Reason:** Contains development notes and references to tools used
+  - **Alternative:** Create submission branch, remove claude.md, push that branch
+  - **Keep it locally** for continued development post-hackathon
+
+**Architecture Decisions (Jan 20, 2026):**
+- ✅ **STEM Proto:** Will NOT mention in public docs (code is substantially original)
+- ✅ **Contact Management:** Implementing **Option B (Delete + Block)** after message testing
+  - Delete = Soft (status: Rejected, can be re-invited)
+  - Block = Hard (status: Blocked, cannot re-invite until unblocked)
+  - Prevents harassment, matches user expectations (Signal/WhatsApp/Telegram all have this)
+
+**Production Launch Plans:**
+- 🚀 **GOING TO MAINNET!** App will launch on Solana Mobile around hackathon submission
+- 🎯 **Backend Provider:** **Fly.io** (recommended for production messaging app)
+  - Excellent WebSocket support
+  - Edge deployment (low latency)
+  - Production-grade infrastructure
+  - Affordable ($5-10/month to start)
+  - Easy scaling
+- 📝 **See PRODUCTION_DEPLOY.md** for complete deployment guide
+
+**Deployment Timeline:**
+1. **Week 1 (Jan 20-23):** MVP + Arcium integration
+2. **Week 2 (Jan 24-30):** Deploy to Fly.io + mainnet, submit hackathon
+3. **Week 3+:** Add persistence, monitoring, launch on Solana Mobile
+
+**Backend Deployment for Hackathon/Production:**
+- ⚠️ **DO NOT hardcode IP address in README/submission** (changes with network location)
+- ✅ **Deploy to Fly.io** for stable production URL
+  - `https://mukon-backend.fly.dev` (or similar)
+  - Works everywhere (emulator, physical device, judges' machines)
+- ✅ **Make URL configurable** for dev/prod environments
+  - Dev: `10.0.2.2:3001` (Android emulator) or `localhost:3001` (iOS)
+  - Prod: `https://mukon-backend.fly.dev`
+
+**TODO before mainnet launch:**
+- [ ] Deploy backend to Fly.io
+- [ ] Make backend URL configurable (dev vs prod)
+- [ ] Deploy Solana program to mainnet-beta
+- [ ] Add message persistence (Fly.io Postgres)
+- [ ] Add monitoring (Sentry, UptimeRobot)
+- [ ] Test extensively on mainnet
+- [ ] Submit to Solana Mobile app store
 
 ## Git Commit Guidelines
 
