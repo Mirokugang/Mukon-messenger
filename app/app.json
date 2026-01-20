@@ -16,6 +16,9 @@
     "assetBundlePatterns": [
       "**/*"
     ],
+    "plugins": [
+      "react-native-reanimated/plugin"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.mukon.messenger"
