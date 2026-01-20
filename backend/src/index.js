@@ -94,9 +94,9 @@ app.get('/messages/:conversationId', (req, res) => {
   const { conversationId } = req.params;
   const { sender, signature } = req.query;
 
-  // Verify signature
-  const message = `Get messages from ${conversationId}`;
-  if (!verifySignature(sender, message, signature)) {
+  // Accept encryption signature as proof of wallet ownership
+  const encryptionMessage = 'Sign this message to derive your encryption keys for Mukon Messenger';
+  if (!verifySignature(sender, encryptionMessage, signature)) {
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
@@ -109,9 +109,10 @@ io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
   socket.on('authenticate', ({ publicKey, signature }) => {
-    // Verify signature
-    const message = `Authenticate ${socket.id}`;
-    if (verifySignature(publicKey, message, signature)) {
+    // Accept encryption signature as proof of wallet ownership
+    // (Client sends cached encryption signature to avoid popup spam)
+    const encryptionMessage = 'Sign this message to derive your encryption keys for Mukon Messenger';
+    if (verifySignature(publicKey, encryptionMessage, signature)) {
       onlineUsers.set(publicKey, socket.id);
       socket.publicKey = publicKey;
       socket.emit('authenticated', { success: true });

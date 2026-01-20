@@ -177,6 +177,8 @@ const styles = StyleSheet.create({
   },
   messagesList: {
     padding: 16,
+    flexGrow: 1,
+    justifyContent: 'flex-end',
   },
   messageBubble: {
     maxWidth: '75%',

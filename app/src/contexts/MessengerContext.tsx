@@ -492,13 +492,17 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   };
 
   const loadConversationMessages = async (conversationId: string) => {
-    if (!wallet?.publicKey || !wallet.signMessage) return;
+    if (!wallet?.publicKey) return;
 
     try {
-      const message = `Get messages from ${conversationId}`;
-      const signature = await wallet.signMessage(Buffer.from(message, 'utf8'));
-      const signatureB58 = bs58.encode(signature);
+      // Use cached encryption signature (no popup!)
+      const encryptionSig = (window as any).__mukonEncryptionSignature;
+      if (!encryptionSig) {
+        console.error('No encryption signature available');
+        return;
+      }
 
+      const signatureB58 = bs58.encode(encryptionSig);
       const url = `${BACKEND_URL}/messages/${conversationId}?sender=${wallet.publicKey.toBase58()}&signature=${encodeURIComponent(signatureB58)}`;
       const response = await fetch(url);
 
