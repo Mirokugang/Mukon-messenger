@@ -25,7 +25,8 @@
         "foregroundImage": "../ICON.png",
         "backgroundColor": "#0D0D0D"
       },
-      "package": "com.mukon.messenger"
+      "package": "com.mukon.messenger",
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "../ICON.png"

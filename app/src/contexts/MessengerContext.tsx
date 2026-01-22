@@ -20,7 +20,7 @@ import { deriveEncryptionKeypair } from '../utils/encryption';
 import type { WalletContextType } from './WalletContext';
 
 // Backend URL - use actual host IP for physical device
-const BACKEND_URL = 'http://192.168.1.33:3001';
+const BACKEND_URL = 'http://192.168.1.178:3001';
 
 export interface Contact {
   publicKey: PublicKey;
@@ -139,7 +139,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
     const newSocket = io(BACKEND_URL, {
       path: '/socket.io',
-      transports: ['websocket', 'polling'], // Match backend order
+      transports: ['polling', 'websocket'], // Try polling first (works on restricted networks)
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       timeout: 30000, // Increase timeout for physical device
@@ -148,7 +148,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     });
 
     newSocket.on('connect', async () => {
-      console.log('✅ Connected to backend');
+      console.log('✅ Connected to backend via', newSocket.io.engine.transport.name);
 
       try {
         // Reuse encryption signature for socket authentication (no new popup!)

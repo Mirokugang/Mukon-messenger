@@ -74,6 +74,18 @@ export default function CustomDrawer({ navigation }: any) {
         }}
         titleStyle={styles.menuItem}
       />
+
+      <Divider style={styles.divider} />
+
+      <List.Item
+        title="Logout"
+        left={(props) => <List.Icon {...props} icon="logout" color={theme.colors.error} />}
+        onPress={() => {
+          wallet.disconnect();
+          navigation.closeDrawer();
+        }}
+        titleStyle={[styles.menuItem, { color: theme.colors.error }]}
+      />
     </DrawerContentScrollView>
   );
 }
