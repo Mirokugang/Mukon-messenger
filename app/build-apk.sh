@@ -2,6 +2,7 @@
 
 # Mukon Messenger - APK Build Script
 # Builds APK and outputs to app/ folder for easy access
+# Usage: ./build-apk.sh [debug|release] [clean]
 
 set -e  # Exit on error
 
@@ -10,6 +11,7 @@ echo ""
 
 # Determine build variant (debug or release)
 VARIANT=${1:-debug}
+CLEAN_FLAG=${2}
 
 if [ "$VARIANT" = "release" ]; then
   echo "📦 Building RELEASE APK..."
@@ -23,8 +25,17 @@ else
   SOURCE_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
 fi
 
-# Navigate to android folder and build
+# Navigate to android folder
 cd android
+
+# Run clean if requested
+if [ "$CLEAN_FLAG" = "clean" ]; then
+  echo "🧹 Running gradle clean..."
+  ./gradlew clean
+  echo ""
+fi
+
+# Build
 ./gradlew $GRADLE_TASK
 
 # Go back to app folder

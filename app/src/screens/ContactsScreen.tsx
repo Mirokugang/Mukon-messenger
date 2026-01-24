@@ -142,7 +142,7 @@ export default function ContactsScreen({ navigation }: any) {
           title={item.displayName || truncateAddress(item.pubkey, 4)}
           description="Wants to connect with you"
           left={(props) => (
-            item.avatar && item.avatar.length === 1 ? (
+            item.avatar && Array.from(item.avatar).length === 1 ? (
               <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
                 <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
               </View>
@@ -198,7 +198,7 @@ export default function ContactsScreen({ navigation }: any) {
           title={item.displayName || truncateAddress(item.pubkey, 4)}
           description="Invitation pending..."
           left={(props) => (
-            item.avatar && item.avatar.length === 1 ? (
+            item.avatar && Array.from(item.avatar).length === 1 ? (
               <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
                 <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
               </View>
@@ -224,7 +224,7 @@ export default function ContactsScreen({ navigation }: any) {
           title={item.displayName || truncateAddress(item.pubkey, 4)}
           description="Blocked"
           left={(props) => (
-            item.avatar && item.avatar.length === 1 ? (
+            item.avatar && Array.from(item.avatar).length === 1 ? (
               <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
                 <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
               </View>
@@ -283,7 +283,7 @@ export default function ContactsScreen({ navigation }: any) {
               title={item.displayName || truncateAddress(item.pubkey, 4)}
               description={item.lastMessage}
               left={(props) => (
-                item.avatar && item.avatar.length === 1 ? (
+                item.avatar && Array.from(item.avatar).length === 1 ? (
                   <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
                     <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
                   </View>

@@ -21,7 +21,7 @@ export default function CustomDrawer({ navigation }: any) {
         style={styles.profileSection}
         onPress={() => navigation.navigate('Profile')}
       >
-        {avatarUrl && avatarUrl.length === 1 ? (
+        {avatarUrl && Array.from(avatarUrl).length === 1 ? (
           <View style={styles.emojiAvatar}>
             <Text style={styles.emojiAvatarText}>{avatarUrl}</Text>
           </View>

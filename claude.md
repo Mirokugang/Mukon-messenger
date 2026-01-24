@@ -14,7 +14,7 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 - User needs to see device logs directly, which are not visible to Claude
 - All testing/debugging should be done by the user running their own dev servers and builds
 
-## Current Status (as of 2026-01-24)
+## Current Status (as of 2026-01-24 Evening)
 
 ### ✅ MVP COMPLETE - Full-Featured E2E Encrypted Messenger!
 
@@ -45,8 +45,10 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 
 **Message Interactions (Jan 24):**
 - ✅ **Reply to messages** - Quote messages with preview in chat
-- ✅ **Message reactions** - 8 quick emojis (❤️ 🔥 💯 😂 👍 👎 😮 🎉)
-- ✅ **Telegram-style quick react bar** - Long-press shows floating emoji row
+- ✅ **Message reactions** - 6 quick emojis (❤️ 🔥 💯 😂 👍 👎)
+- ✅ **Telegram-style quick react bar** - Short press shows floating emoji row
+- ✅ **Reaction toggle behavior** - One reaction per user, click same emoji to remove
+- ✅ **Separated touch handlers** - Short press (quick react) vs long press (full menu)
 - ✅ **Copy message** - Copy text to clipboard (expo-clipboard)
 - ✅ **Pin message** - Placeholder for future implementation
 - ✅ **Enhanced delete menu** - Submenu with "Delete for Me" / "Delete for Everyone"
@@ -55,7 +57,10 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 **Avatars & Profile (Jan 24):**
 - ✅ **Emoji avatars** - 200+ curated emojis for user profiles
 - ✅ **Avatar in chat** - Shows next to incoming messages (Telegram-style)
+- ✅ **Avatar in chat header** - Displays next to contact name in header bar
 - ✅ **Avatar in drawer** - Profile section shows emoji and username
+- ✅ **Avatar in contacts list** - Shows in all contact states
+- ✅ **UTF-16 emoji fix** - Proper character counting with Array.from()
 - ✅ **Always-editable username** - Update display name anytime in profile
 - ✅ **Tap to change avatar** - Emoji picker in profile screen
 
@@ -107,12 +112,15 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 7. ✅ ~~Add emoji avatars~~ - COMPLETE!
 8. ✅ ~~Add message reactions~~ - COMPLETE!
 9. ✅ ~~Add reply to message~~ - COMPLETE!
-10. 🔜 **ARCIUM INTEGRATION** - Encrypt contact lists on-chain ($10k bounty)
-11. Test domain resolution on mainnet (.sol/.skr)
-12. Add wallet connection persistence (AsyncStorage)
-13. Add backend message persistence (SQLite or Redis)
-14. Polish UI/UX (loading states, error messages)
-15. Deploy backend to Fly.io for production
+10. ✅ ~~Fix avatar display bugs~~ - COMPLETE!
+11. ✅ ~~Add reaction toggle behavior~~ - COMPLETE!
+12. 🔜 **GROUP CHAT ARCHITECTURE** - Design group chat system before Arcium
+13. 🔜 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty)
+14. Test domain resolution on mainnet (.sol/.skr)
+15. Add wallet connection persistence (AsyncStorage)
+16. Add backend message persistence (SQLite or Redis)
+17. Polish UI/UX (loading states, error messages)
+18. Deploy backend to Fly.io for production
 
 ## What We're Building
 
@@ -615,6 +623,61 @@ socket.on('delete_message', ({ conversationId, messageId, deleteForBoth }) => {
 
 **Status:** ✅ Telegram-style sidebar implemented! Ready for testing.
 
+### ✅ NEW: Build System Improvements (Jan 24)
+
+**Problem:** Need safe, tiered build options - avoid "nuclear option" (expo prebuild --clean) unless absolutely necessary.
+
+**Solution - Three-Tier Build System:**
+
+1. **Regular build** - `npm run build`
+   - Fast, for JS/TS changes only
+   - No gradle clean, no prebuild
+   - 99% of development work
+
+2. **Gradle clean build** - `npm run build:clean`
+   - Surgical native cleanup
+   - For native module changes, build errors
+   - Safer than full prebuild
+
+3. **Prebuild clean** - `npm run build:prebuild`
+   - Nuclear option - regenerates /android and /ios
+   - Only for: app.json changes, config plugins, major Expo upgrades
+   - ⚠️ Deletes native folders entirely
+
+**Implementation:**
+
+1. **Created build-apk.sh script:**
+   - Takes build type (debug/release) and optional "clean" flag
+   - Runs gradle clean if requested
+   - Copies APK to app/ folder with clean name
+   - Shows file size and install command
+
+2. **Updated package.json with clear scripts:**
+   ```json
+   "build": "./build-apk.sh debug",
+   "build:clean": "./build-apk.sh debug clean",
+   "build:prebuild": "npx expo prebuild --clean && ./build-apk.sh debug"
+   ```
+
+3. **Created BUILD.md documentation:**
+   - Decision tree for which build to use
+   - Warnings about prebuild --clean
+   - Troubleshooting guide
+   - When to escalate from build → clean → prebuild
+
+**Files Changed:**
+- Created: `app/build-apk.sh` (unified build script)
+- Created: `app/BUILD.md` (comprehensive build guide)
+- Updated: `app/package.json` (6 new build scripts)
+
+**Why This Matters:**
+- Prevents accidental native folder deletion
+- Clear escalation path when builds break
+- Documented for future reference
+- Safe for Mukon (minimal native code), dangerous for apps with custom native modules
+
+**Status:** ✅ Build system documented and safe!
+
 ### ✅ NEW: Message Reactions, Replies, and Emoji Avatars (Jan 24)
 
 **Problem:** Need modern messaging features to compete with Telegram/WhatsApp/Signal - reactions, replies, avatars.
@@ -724,6 +787,101 @@ socket.on('add_reaction', ({ conversationId, messageId, emoji, userId }) => {
 - **Domain cache stored as:** AsyncStorage key `domain_${pubkey}`
 
 **Status:** ✅ Full Telegram-style messaging UI complete! Ready for Arcium integration.
+
+### ✅ FIXED: Avatar Display & Reaction Toggle (Jan 24 Evening)
+
+**Problem 1: Avatars not displaying anywhere**
+- Emoji avatars weren't showing in drawer menu, chat messages, contacts list, or chat header
+- Root cause: JavaScript `.length` property treats multi-byte emojis incorrectly
+  - Example: `"🦅".length === 2` (WRONG - UTF-16 encoding)
+  - Should be: `Array.from("🦅").length === 1` (CORRECT)
+
+**Solution:**
+- Replaced all `avatar.length === 1` checks with `Array.from(avatar).length === 1`
+- Applied consistently across 4 locations:
+  - `ChatScreen.tsx` - Message bubbles and header
+  - `CustomDrawer.tsx` - Profile section
+  - `ContactsScreen.tsx` - Contact list items
+
+**Problem 2: Reaction system needs refinement**
+- Users could react multiple times to same message
+- No way to remove a reaction once added
+- Reactions appeared on top of message text (unreadable)
+
+**Solution - Reaction Toggle Logic (Backend):**
+```javascript
+const alreadyReacted = message.reactions[emoji]?.includes(userId);
+
+if (alreadyReacted) {
+  // Remove reaction (toggle off)
+  message.reactions[emoji].splice(index, 1);
+} else {
+  // Remove from all other reactions (one reaction per user)
+  for (const [existingEmoji, users] of Object.entries(message.reactions)) {
+    const index = users.indexOf(userId);
+    if (index > -1) users.splice(index, 1);
+  }
+  // Add to new reaction
+  message.reactions[emoji].push(userId);
+}
+```
+
+**Solution - Reaction Positioning (Frontend):**
+- Moved reactions outside `TouchableOpacity` component
+- Now renders below message bubble instead of inside it
+- Added `marginTop: -4` to slightly overlap bubble edge (Telegram-style)
+
+**Problem 3: Touch handlers conflicting**
+- Quick react bar and full menu both triggered on long press
+- UX unclear - when to show emojis vs full menu
+
+**Solution - Separated Touch Handlers:**
+```typescript
+<TouchableOpacity
+  onPress={() => {
+    // Short press - show ONLY emoji chip
+    setQuickReactVisible(item.id);
+    setMenuVisible(null);
+  }}
+  onLongPress={() => {
+    // Long press - show ONLY menu
+    setMenuVisible(item.id);
+    setQuickReactVisible(null);
+  }}
+```
+
+**Conditional Rendering:**
+```typescript
+{quickReactVisible === item.id && !menuVisible && (
+  <View style={styles.quickReactBar}>
+    {/* Quick emoji row */}
+  </View>
+)}
+
+{menuVisible === item.id && (
+  <Menu>
+    {/* Full menu: React, Reply, Copy, Pin, Delete */}
+  </Menu>
+)}
+```
+
+**Problem 4: Backend changes not reflecting**
+- Reaction updates weren't appearing because backend server wasn't restarted
+- Important reminder: Node.js backend requires manual restart (no hot reload like Metro)
+
+**Files Changed:**
+- Updated: `app/src/screens/ChatScreen.tsx` (emoji length fix, touch handlers, reaction positioning, header avatar)
+- Updated: `app/src/components/CustomDrawer.tsx` (emoji length fix)
+- Updated: `app/src/screens/ContactsScreen.tsx` (emoji length fix in 4 locations)
+- Updated: `backend/src/index.js` (reaction toggle logic)
+
+**Architecture Decisions:**
+- **One reaction per user per message** - Matches Telegram/WhatsApp behavior
+- **Toggle to remove** - Clicking same emoji removes reaction
+- **Reactions below text** - Prevents obscuring message content
+- **Short vs long press** - Clear UX for quick react vs full menu
+
+**Status:** ✅ Avatar display fixed everywhere! ✅ Reaction system polished! ✅ Ready for group chat architecture!
 
 ## Testing Guidelines
 

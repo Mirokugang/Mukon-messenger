@@ -54,6 +54,10 @@ export default function ChatScreen({ route, navigation }: any) {
     const isSystem = msg.type === 'system';
     let content = msg.content;
 
+    if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+      console.log(`💬 Message ${msg.id} has reactions in raw data:`, msg.reactions);
+    }
+
     // System messages are always plaintext
     if (isSystem) {
       return {
@@ -177,9 +181,14 @@ export default function ChatScreen({ route, navigation }: any) {
   };
 
   React.useLayoutEffect(() => {
+    const showAvatar = contact.avatar && Array.from(contact.avatar).length === 1;
+
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitle}>
+          {showAvatar && (
+            <Text style={styles.headerAvatar}>{contact.avatar}</Text>
+          )}
           <Text style={styles.headerName}>
             {displayName}
           </Text>
@@ -231,16 +240,26 @@ export default function ChatScreen({ route, navigation }: any) {
   };
 
   const handleReaction = (emoji: string) => {
-    if (!reactingToMessageId) return;
+    console.log('🎯 Full picker react - Emoji:', emoji, 'MessageID:', reactingToMessageId);
 
-    // TODO: Send reaction to backend
-    messenger.socket?.emit('add_reaction', {
+    if (!reactingToMessageId) {
+      console.error('❌ No reactingToMessageId set');
+      return;
+    }
+
+    if (!messenger.socket || !wallet.publicKey) {
+      console.error('❌ Socket or wallet not ready');
+      return;
+    }
+
+    messenger.socket.emit('add_reaction', {
       conversationId,
       messageId: reactingToMessageId,
       emoji,
-      userId: wallet.publicKey?.toBase58(),
+      userId: wallet.publicKey.toBase58(),
     });
 
+    console.log('✅ Full picker reaction emitted to backend');
     setReactingToMessageId(null);
   };
 
@@ -262,12 +281,25 @@ export default function ChatScreen({ route, navigation }: any) {
   };
 
   const handleQuickReact = (messageId: string, emoji: string) => {
-    messenger.socket?.emit('add_reaction', {
+    console.log('🎯 Quick react - Emoji:', emoji, 'MessageID:', messageId, 'ConversationID:', conversationId);
+    console.log('Socket connected?', messenger.socket?.connected);
+
+    if (!messenger.socket || !wallet.publicKey) {
+      console.error('❌ Socket or wallet not ready');
+      return;
+    }
+
+    // Test: emit with acknowledgement callback
+    messenger.socket.emit('add_reaction', {
       conversationId,
       messageId,
       emoji,
-      userId: wallet.publicKey?.toBase58(),
+      userId: wallet.publicKey.toBase58(),
+    }, (response: any) => {
+      console.log('📬 Backend acknowledged reaction:', response);
     });
+
+    console.log('✅ Reaction emitted to backend');
     setQuickReactVisible(null);
     setMenuVisible(null);
   };
@@ -290,7 +322,8 @@ export default function ChatScreen({ route, navigation }: any) {
     }
 
     // Regular encrypted messages with avatar for incoming messages
-    const showAvatar = !item.isMe && contact.avatar && contact.avatar.length === 1;
+    // Check if avatar is a single emoji (emojis can be 2+ chars in JS due to UTF-16)
+    const showAvatar = !item.isMe && contact.avatar && Array.from(contact.avatar).length === 1;
 
     return (
       <View style={[styles.messageRow, item.isMe ? styles.myMessageRow : styles.theirMessageRow]}>
@@ -301,20 +334,26 @@ export default function ChatScreen({ route, navigation }: any) {
           </View>
         )}
 
-        <View>
-          {/* Quick React Row (Telegram-style) */}
-          {quickReactVisible === item.id && (
-            <View style={styles.quickReactBar}>
-              {['❤️', '🔥', '💯', '😂', '👍', '👎'].map((emoji) => (
-                <TouchableOpacity
-                  key={emoji}
-                  style={styles.quickReactButton}
-                  onPress={() => handleQuickReact(item.id, emoji)}
-                >
-                  <Text style={styles.quickReactEmoji}>{emoji}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+        <View style={{ flex: 1 }}>
+          {/* Quick React Row - ONLY on short press */}
+          {quickReactVisible === item.id && !menuVisible && (
+            <TouchableOpacity
+              style={styles.quickReactBarContainer}
+              activeOpacity={1}
+              onPress={() => setQuickReactVisible(null)}
+            >
+              <View style={styles.quickReactBar}>
+                {['❤️', '🔥', '💯', '😂', '👍', '👎'].map((emoji) => (
+                  <TouchableOpacity
+                    key={emoji}
+                    style={styles.quickReactButton}
+                    onPress={() => handleQuickReact(item.id, emoji)}
+                  >
+                    <Text style={styles.quickReactEmoji}>{emoji}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </TouchableOpacity>
           )}
 
           <Menu
@@ -325,9 +364,15 @@ export default function ChatScreen({ route, navigation }: any) {
             }}
             anchor={
               <TouchableOpacity
-                onLongPress={() => {
+                onPress={() => {
+                  // Short press - show ONLY emoji chip
                   setQuickReactVisible(item.id);
+                  setMenuVisible(null);
+                }}
+                onLongPress={() => {
+                  // Long press - show ONLY menu
                   setMenuVisible(item.id);
+                  setQuickReactVisible(null);
                 }}
                 style={[
                   styles.messageBubble,
@@ -346,26 +391,32 @@ export default function ChatScreen({ route, navigation }: any) {
 
                 <Text style={styles.messageText}>{item.content}</Text>
 
-                {/* Reactions display */}
-                {item.reactions && Object.keys(item.reactions).length > 0 && (
+                <Text style={styles.messageTime}>
+                  {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Reactions display - BELOW the message bubble */}
+              {(() => {
+                const hasReactions = item.reactions && Object.keys(item.reactions).length > 0;
+                if (hasReactions) {
+                  console.log(`Message ${item.id} has reactions:`, item.reactions);
+                }
+                return hasReactions ? (
                   <View style={styles.reactionsContainer}>
                     {Object.entries(item.reactions).map(([emoji, users]: [string, any]) => (
-                      users.length > 0 && (
+                      users && users.length > 0 ? (
                         <View key={emoji} style={styles.reactionBubble}>
                           <Text style={styles.reactionEmoji}>{emoji}</Text>
                           {users.length > 1 && (
                             <Text style={styles.reactionCount}>{users.length}</Text>
                           )}
                         </View>
-                      )
+                      ) : null
                     ))}
                   </View>
-                )}
-
-                <Text style={styles.messageTime}>
-                  {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-              </TouchableOpacity>
+                ) : null;
+              })()}
             }
           >
             <Menu.Item
@@ -537,7 +588,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   headerTitle: {
-    flexDirection: 'column',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerAvatar: {
+    fontSize: 24,
   },
   headerName: {
     fontSize: 16,
@@ -672,7 +728,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 4,
-    marginTop: 4,
+    marginTop: -4,
+    marginLeft: 8,
     marginBottom: 4,
   },
   reactionBubble: {
@@ -692,24 +749,33 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: '600',
   },
+  quickReactBarContainer: {
+    position: 'absolute',
+    top: -60,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    alignItems: 'center',
+  },
   quickReactBar: {
     flexDirection: 'row',
     backgroundColor: theme.colors.surface,
-    borderRadius: 24,
-    padding: 8,
-    marginBottom: 8,
-    alignSelf: 'center',
+    borderRadius: 30,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+    minWidth: 280,
+    justifyContent: 'space-evenly',
   },
   quickReactButton: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 4,
   },
   quickReactEmoji: {
-    fontSize: 24,
+    fontSize: 28,
   },
 });

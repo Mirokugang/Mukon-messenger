@@ -198,36 +198,74 @@ io.on('connection', (socket) => {
   });
 
   socket.on('add_reaction', ({ conversationId, messageId, emoji, userId }) => {
+    console.log(`📨 add_reaction received:`, { conversationId: conversationId.slice(0, 8) + '...', messageId, emoji, userId: userId.slice(0, 8) + '...' });
+
     if (!socket.publicKey) {
+      console.error('❌ Not authenticated');
       socket.emit('error', { message: 'Not authenticated' });
       return;
     }
 
     // Find the message and add reaction
     const msgs = messages.get(conversationId) || [];
+    console.log(`Found ${msgs.length} messages in conversation`);
     const message = msgs.find(m => m.id === messageId);
 
     if (message) {
+      console.log(`✅ Found message ${messageId}`);
       if (!message.reactions) {
         message.reactions = {};
       }
-      if (!message.reactions[emoji]) {
-        message.reactions[emoji] = [];
-      }
 
-      // Add user to reaction list if not already there
-      if (!message.reactions[emoji].includes(userId)) {
+      // Check if user already reacted with this emoji
+      const alreadyReacted = message.reactions[emoji]?.includes(userId);
+
+      if (alreadyReacted) {
+        // REMOVE the reaction (toggle off)
+        const index = message.reactions[emoji].indexOf(userId);
+        message.reactions[emoji].splice(index, 1);
+        console.log(`🗑️  User removed reaction ${emoji}`);
+
+        // Clean up empty reaction arrays
+        if (message.reactions[emoji].length === 0) {
+          delete message.reactions[emoji];
+        }
+      } else {
+        // REMOVE user from all other reactions (only one reaction per user)
+        for (const [existingEmoji, users] of Object.entries(message.reactions)) {
+          const index = users.indexOf(userId);
+          if (index > -1) {
+            users.splice(index, 1);
+            console.log(`🗑️  Removed user from ${existingEmoji}`);
+            // Clean up empty reaction arrays
+            if (users.length === 0) {
+              delete message.reactions[existingEmoji];
+            }
+          }
+        }
+
+        // Add user to new reaction
+        if (!message.reactions[emoji]) {
+          message.reactions[emoji] = [];
+        }
         message.reactions[emoji].push(userId);
+        console.log(`✅ User now reacting with ${emoji}`);
       }
 
       // Broadcast updated reactions to everyone in conversation
+      const room = io.sockets.adapter.rooms.get(conversationId);
+      const roomSize = room ? room.size : 0;
+      console.log(`Broadcasting reaction to ${roomSize} clients in room`);
+
       io.to(conversationId).emit('reaction_updated', {
         conversationId,
         messageId,
         reactions: message.reactions
       });
 
-      console.log(`Reaction ${emoji} added to message ${messageId} by ${userId}`);
+      console.log(`✅ Reaction ${emoji} added to message ${messageId} by ${userId.slice(0, 8)}... Final reactions:`, message.reactions);
+    } else {
+      console.error(`❌ Message ${messageId} not found in conversation ${conversationId.slice(0, 8)}...`);
     }
   });
 

@@ -244,10 +244,15 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     });
 
     newSocket.on('reaction_updated', ({ conversationId, messageId, reactions }) => {
-      console.log('Reaction updated:', conversationId, messageId, reactions);
+      console.log('📨 Reaction updated:', {
+        conversationId: conversationId.slice(0, 8) + '...',
+        messageId,
+        reactions: JSON.stringify(reactions)
+      });
       setMessages((prev) => {
         const updated = new Map(prev);
         const conversationMessages = updated.get(conversationId) || [];
+        console.log(`Updating message ${messageId} with reactions:`, reactions);
         const updatedMessages = conversationMessages.map(m =>
           m.id === messageId ? { ...m, reactions } : m
         );
