@@ -14,9 +14,9 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 - User needs to see device logs directly, which are not visible to Claude
 - All testing/debugging should be done by the user running their own dev servers and builds
 
-## Current Status (as of 2026-01-20)
+## Current Status (as of 2026-01-24)
 
-### ✅ MVP COMPLETE - Working E2E Encrypted Messenger!
+### ✅ MVP COMPLETE - Full-Featured E2E Encrypted Messenger!
 
 **What's Deployed:**
 - NEW Solana program on devnet: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
@@ -24,6 +24,8 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 - Backend WebSocket server running on 192.168.1.33:3001 (host IP for physical device)
 
 **What's Working:**
+
+**Core Messaging:**
 - ✅ Solana Mobile Wallet Adapter (MWA) integration
 - ✅ Manual transaction construction (no Anchor SDK in app - React Native compatible!)
 - ✅ User registration with encryption public key stored on-chain
@@ -40,6 +42,29 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 - ✅ Duplicate message detection (matches by encrypted+nonce+sender)
 - ✅ Decryption of both incoming and own messages from backend history
 - ✅ **MessengerContext architecture** - ONE socket instance, shared encryption keys, centralized state
+
+**Message Interactions (Jan 24):**
+- ✅ **Reply to messages** - Quote messages with preview in chat
+- ✅ **Message reactions** - 8 quick emojis (❤️ 🔥 💯 😂 👍 👎 😮 🎉)
+- ✅ **Telegram-style quick react bar** - Long-press shows floating emoji row
+- ✅ **Copy message** - Copy text to clipboard (expo-clipboard)
+- ✅ **Pin message** - Placeholder for future implementation
+- ✅ **Enhanced delete menu** - Submenu with "Delete for Me" / "Delete for Everyone"
+- ✅ **Reorganized menu** - React → Reply → Copy → Pin → Delete
+
+**Avatars & Profile (Jan 24):**
+- ✅ **Emoji avatars** - 200+ curated emojis for user profiles
+- ✅ **Avatar in chat** - Shows next to incoming messages (Telegram-style)
+- ✅ **Avatar in drawer** - Profile section shows emoji and username
+- ✅ **Always-editable username** - Update display name anytime in profile
+- ✅ **Tap to change avatar** - Emoji picker in profile screen
+
+**Contact Management (Jan 24):**
+- ✅ **.sol/.skr domain resolution** - Add contacts by domain name
+- ✅ **Contact custom names** - Local storage via AsyncStorage
+- ✅ **Contact name syncing** - useFocusEffect refreshes across screens
+- ✅ **Domain caching** - Faster lookups for resolved domains
+- ✅ **Manual SNS implementation** - React Native compatible (js-sha256)
 
 **Recent Major Refactor (Jan 20):**
 - Created `MessengerContext` to centralize socket/encryption/state management
@@ -78,11 +103,16 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 3. ✅ ~~Add message deletion~~ - COMPLETE!
 4. ✅ ~~Add block/unblock UI buttons~~ - COMPLETE!
 5. ✅ ~~Add Telegram-style sidebar navigation~~ - COMPLETE!
-6. Test block/unblock/delete flows thoroughly
-7. Add wallet connection persistence (AsyncStorage)
-8. Add backend message persistence (SQLite or Redis)
-9. Polish UI/UX (loading states, error messages)
-10. Add .sol/.skr domain name resolution for contacts
+6. ✅ ~~Add .sol/.skr domain name resolution~~ - COMPLETE!
+7. ✅ ~~Add emoji avatars~~ - COMPLETE!
+8. ✅ ~~Add message reactions~~ - COMPLETE!
+9. ✅ ~~Add reply to message~~ - COMPLETE!
+10. 🔜 **ARCIUM INTEGRATION** - Encrypt contact lists on-chain ($10k bounty)
+11. Test domain resolution on mainnet (.sol/.skr)
+12. Add wallet connection persistence (AsyncStorage)
+13. Add backend message persistence (SQLite or Redis)
+14. Polish UI/UX (loading states, error messages)
+15. Deploy backend to Fly.io for production
 
 ## What We're Building
 
@@ -584,6 +614,116 @@ socket.on('delete_message', ({ conversationId, messageId, deleteForBoth }) => {
 - Wallet Settings
 
 **Status:** ✅ Telegram-style sidebar implemented! Ready for testing.
+
+### ✅ NEW: Message Reactions, Replies, and Emoji Avatars (Jan 24)
+
+**Problem:** Need modern messaging features to compete with Telegram/WhatsApp/Signal - reactions, replies, avatars.
+
+**Solution - Message Reactions:**
+
+1. **Backend reaction storage (backend/src/index.js):**
+```javascript
+socket.on('add_reaction', ({ conversationId, messageId, emoji, userId }) => {
+  const message = msgs.find(m => m.id === messageId);
+  if (!message.reactions) message.reactions = {};
+  if (!message.reactions[emoji]) message.reactions[emoji] = [];
+  if (!message.reactions[emoji].includes(userId)) {
+    message.reactions[emoji].push(userId);
+  }
+  io.to(conversationId).emit('reaction_updated', { conversationId, messageId, reactions: message.reactions });
+});
+```
+
+2. **Telegram-style quick react bar:**
+   - Long-press message shows floating emoji row (❤️ 🔥 💯 😂 👍 👎)
+   - Tap emoji = instant reaction
+   - Full emoji picker still available via menu
+   - Reactions display below message in small bubbles with counts
+
+**Solution - Reply to Messages:**
+
+1. **Reply reference in message structure:**
+   - Messages store `replyTo` field (message ID being replied to)
+   - Backend stores and broadcasts reply references
+   - Client decrypts both original and replied messages
+
+2. **Reply preview UI:**
+   - Input area shows quoted message preview when replying
+   - Message bubbles show quoted text above content
+   - Styled with left border and italic text (Telegram-style)
+
+**Solution - Emoji Avatars:**
+
+1. **EmojiPicker component (200+ emojis):**
+   - Faces, animals, objects, food, activities, symbols
+   - Grid layout with Portal/Dialog
+   - Tap to select, updates profile immediately
+
+2. **Avatar display locations:**
+   - Profile screen: Tap large avatar to change
+   - Chat screen: Small avatar next to incoming messages (Telegram-style)
+   - Drawer menu: Avatar above username and wallet address
+   - Contacts list: Avatar in all contact states (pending, accepted, blocked)
+
+3. **Username editing:**
+   - Always-editable TextInput in profile
+   - No "edit mode" toggle - just type and save
+   - "Update Username" button saves to on-chain profile
+   - Displays in drawer above wallet address
+
+**Solution - Enhanced Message Menu:**
+
+1. **Reorganized menu order (Telegram-style):**
+   - React (full emoji picker)
+   - Reply (quote message)
+   - Copy Message (to clipboard)
+   - Pin Message (placeholder)
+   - Delete (opens submenu)
+
+2. **Delete submenu:**
+   - "Delete for Me" - Always available
+   - "Delete for Everyone" - Only shown to sender
+   - Prevents accidental deletions
+
+**Solution - Contact Renaming & Domain Resolution:**
+
+1. **Local contact names:**
+   - AsyncStorage stores custom names per pubkey
+   - useContactNames hook loads names for all contacts
+   - useFocusEffect refreshes names when navigating between screens
+
+2. **Domain resolution (.sol/.skr):**
+   - Manual SNS implementation (React Native compatible)
+   - js-sha256 for domain hashing
+   - Connects to mainnet for domain lookups
+   - Caches resolved domains in AsyncStorage
+   - Falls back to custom name > domain > on-chain name > pubkey
+
+**Files Changed:**
+- Created: `app/src/components/EmojiPicker.tsx` (200+ emoji grid)
+- Created: `app/src/components/ReactionPicker.tsx` (8 quick reactions)
+- Created: `app/src/hooks/useContactNames.ts` (contact name management)
+- Created: `app/src/utils/domains.ts` (SNS resolution + custom names)
+- Updated: `app/src/screens/ChatScreen.tsx` (reactions, replies, quick react bar, avatars)
+- Updated: `app/src/screens/ProfileScreen.tsx` (always-editable username, emoji picker)
+- Updated: `app/src/components/CustomDrawer.tsx` (avatar + username display)
+- Updated: `app/src/contexts/MessengerContext.tsx` (replyTo support, reaction listeners)
+- Updated: `backend/src/index.js` (reaction storage, reply references)
+- Created: `app/build-apk.sh` (simplified build script)
+- Created: `app/BUILD.md` (build documentation)
+
+**Dependencies Added:**
+- `expo-clipboard` - Copy message to clipboard
+- `js-sha256` - Manual SNS domain hashing (React Native compatible)
+
+**Architecture Decisions:**
+- **Reactions stored as:** `{ "❤️": ["userId1", "userId2"], "🔥": ["userId3"] }`
+- **Replies stored as:** Message ID reference in `replyTo` field
+- **Avatars stored as:** Single emoji character in `avatarUrl` field (on-chain)
+- **Custom names stored as:** AsyncStorage key `contact_custom_name_${pubkey}`
+- **Domain cache stored as:** AsyncStorage key `domain_${pubkey}`
+
+**Status:** ✅ Full Telegram-style messaging UI complete! Ready for Arcium integration.
 
 ## Testing Guidelines
 
