@@ -8,6 +8,7 @@ import {
   getUserProfilePDA,
   getWalletDescriptorPDA,
   createRegisterInstruction,
+  createUpdateProfileInstruction,
   createInviteInstruction,
   createAcceptInvitationInstruction,
   createRejectInvitationInstruction,
@@ -16,17 +17,18 @@ import {
   buildTransaction,
   deserializeWalletDescriptor,
 } from '../utils/transactions';
-import { deriveEncryptionKeypair } from '../utils/encryption';
+import { deriveEncryptionKeypair, getChatHash } from '../utils/encryption';
 import type { WalletContextType } from './WalletContext';
 
 // Backend URL - use actual host IP for physical device
-const BACKEND_URL = 'http://192.168.1.178:3001';
+const BACKEND_URL = 'http://192.168.68.57:3001';
 
 export interface Contact {
   publicKey: PublicKey;
   displayName?: string;
   encryptionPublicKey?: Uint8Array;
-  status: 'pending' | 'accepted' | 'rejected';
+  state: 'Invited' | 'Requested' | 'Accepted' | 'Rejected' | 'Blocked';
+  avatarUrl?: string;
 }
 
 interface Profile {
@@ -53,7 +55,7 @@ interface MessengerContextType {
   deleteContact: (contactPubkey: PublicKey) => Promise<string>;
   blockContact: (contactPubkey: PublicKey) => Promise<string>;
   unblockContact: (contactPubkey: PublicKey) => Promise<string>;
-  sendMessage: (conversationId: string, content: string, recipientPubkey: PublicKey) => Promise<void>;
+  sendMessage: (conversationId: string, content: string, recipientPubkey: PublicKey, replyToMessageId?: string) => Promise<void>;
   deleteMessage: (conversationId: string, messageId: string, deleteForBoth: boolean) => void;
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
@@ -241,6 +243,19 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       });
     });
 
+    newSocket.on('reaction_updated', ({ conversationId, messageId, reactions }) => {
+      console.log('Reaction updated:', conversationId, messageId, reactions);
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        const conversationMessages = updated.get(conversationId) || [];
+        const updatedMessages = conversationMessages.map(m =>
+          m.id === messageId ? { ...m, reactions } : m
+        );
+        updated.set(conversationId, updatedMessages);
+        return updated;
+      });
+    });
+
     setSocket(newSocket);
 
     return () => {
@@ -307,8 +322,20 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
     setLoading(true);
     try {
-      // Implementation here - similar to register
-      throw new Error('Not implemented yet');
+      const instruction = createUpdateProfileInstruction(
+        wallet.publicKey,
+        displayName,
+        avatarUrl || '',
+        encryptionKeys ? Array.from(encryptionKeys.publicKey) : undefined
+      );
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      // Reload profile to reflect changes
+      await loadProfile();
+      return txSignature;
     } catch (error) {
       console.error('Failed to update profile:', error);
       throw error;
@@ -322,13 +349,32 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
     setLoading(true);
     try {
-      const instruction = createInviteInstruction(wallet.publicKey, inviteePubkey);
+      // Calculate chat hash for the conversation PDA
+      const chatHash = getChatHash(wallet.publicKey, inviteePubkey);
+      const instruction = createInviteInstruction(wallet.publicKey, inviteePubkey, chatHash);
       const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
       const signedTransaction = await wallet.signTransaction(transaction);
       const txSignature = await connection.sendTransaction(signedTransaction);
       await connection.confirmTransaction(txSignature, 'confirmed');
 
       await loadContacts();
+
+      // Send system message for invitation
+      if (socket) {
+        const conversationId = Buffer.from(chatHash).toString('hex');
+        const inviteMessage = {
+          conversationId,
+          sender: wallet.publicKey.toBase58(),
+          recipient: inviteePubkey.toBase58(),
+          type: 'system',
+          content: `You've been invited to chat on Mukon! Accept the invitation to start messaging.`,
+          timestamp: Date.now(),
+        };
+
+        socket.emit('send_message', inviteMessage);
+        console.log('📨 Sent invitation system message');
+      }
+
       return txSignature;
     } catch (error) {
       console.error('Failed to invite:', error);
@@ -350,6 +396,24 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       await connection.confirmTransaction(txSignature, 'confirmed');
 
       await loadContacts();
+
+      // Send system message for acceptance
+      if (socket) {
+        const chatHash = getChatHash(wallet.publicKey, inviterPubkey);
+        const conversationId = Buffer.from(chatHash).toString('hex');
+        const acceptMessage = {
+          conversationId,
+          sender: wallet.publicKey.toBase58(),
+          recipient: inviterPubkey.toBase58(),
+          type: 'system',
+          content: `Invitation accepted! You can now chat securely.`,
+          timestamp: Date.now(),
+        };
+
+        socket.emit('send_message', acceptMessage);
+        console.log('📨 Sent acceptance system message');
+      }
+
       return txSignature;
     } catch (error) {
       console.error('Failed to accept invitation:', error);
@@ -426,7 +490,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     }
   };
 
-  const sendMessage = async (conversationId: string, content: string, recipientPubkey: PublicKey) => {
+  const sendMessage = async (conversationId: string, content: string, recipientPubkey: PublicKey, replyToMessageId?: string) => {
     if (!wallet?.publicKey || !socket) throw new Error('Not ready');
     if (!encryptionKeys) throw new Error('Encryption keys not available');
 
@@ -458,6 +522,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         nonce: nonceBase64,
         sender: wallet.publicKey.toBase58(),
         timestamp,
+        replyTo: replyToMessageId, // Reply reference
       });
 
       console.log('✅ Encrypted message sent via socket');
@@ -619,36 +684,41 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
       const contactsWithKeys = await Promise.all(
         descriptor.peers
-          .filter(peer => peer.status === 'Accepted')
+          // Load ALL peers (not just Accepted) so we can check state in AddContactScreen
           .map(async (peer) => {
             const peerProfilePDA = getUserProfilePDA(peer.pubkey);
             const peerAccountInfo = await connection.getAccountInfo(peerProfilePDA);
+
+            let displayName: string | undefined;
+            let avatarUrl: string | undefined;
+            let encryptionPublicKey: Uint8Array | undefined;
 
             if (peerAccountInfo) {
               const data = peerAccountInfo.data;
               let offset = 8 + 32;
               const displayNameLength = data.readUInt32LE(offset);
-              offset += 4 + displayNameLength;
+              offset += 4;
+              displayName = data.slice(offset, offset + displayNameLength).toString('utf-8');
+              offset += displayNameLength;
               const avatarUrlLength = data.readUInt32LE(offset);
-              offset += 4 + avatarUrlLength;
-              const encryptionPublicKey = data.slice(offset, offset + 32);
+              offset += 4;
+              avatarUrl = data.slice(offset, offset + avatarUrlLength).toString('utf-8');
+              offset += avatarUrlLength;
+              encryptionPublicKey = data.slice(offset, offset + 32);
 
-              console.log(
-                `Loaded encryption key for ${peer.pubkey.toBase58().slice(0, 8)}...: ${Buffer.from(encryptionPublicKey).toString('hex').slice(0, 16)}...`
-              );
-
-              return {
-                publicKey: peer.pubkey,
-                displayName: '',
-                encryptionPublicKey,
-                status: 'accepted' as const,
-              };
+              if (peer.status === 'Accepted') {
+                console.log(
+                  `Loaded encryption key for ${peer.pubkey.toBase58().slice(0, 8)}...: ${Buffer.from(encryptionPublicKey).toString('hex').slice(0, 16)}...`
+                );
+              }
             }
 
             return {
               publicKey: peer.pubkey,
-              displayName: '',
-              status: 'accepted' as const,
+              displayName,
+              avatarUrl,
+              encryptionPublicKey,
+              state: peer.status, // Map status to state field
             };
           })
       );

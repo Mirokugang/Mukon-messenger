@@ -1,12 +1,15 @@
 import React from 'react';
 import { View, FlatList, StyleSheet, Alert, TouchableOpacity } from 'react-native';
-import { List, FAB, Searchbar, Avatar, Badge, Text, Button, Menu } from 'react-native-paper';
+import { List, FAB, Searchbar, Avatar, Badge, Text, Button, Menu, Dialog, Portal, TextInput } from 'react-native-paper';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
+import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme';
 import { truncateAddress, getChatHash } from '../utils/encryption';
 import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
+import { useContactNames } from '../hooks/useContactNames';
+import { setContactCustomName, getContactCustomName, getCachedDomain } from '../utils/domains';
 
 export default function ContactsScreen({ navigation }: any) {
   const wallet = useWallet();
@@ -14,6 +17,18 @@ export default function ContactsScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [registering, setRegistering] = React.useState(false);
   const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
+  const [renameDialogVisible, setRenameDialogVisible] = React.useState(false);
+  const [renamingContact, setRenamingContact] = React.useState<{ pubkey: string; currentName: string } | null>(null);
+  const [newName, setNewName] = React.useState('');
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  const displayNames = useContactNames(messenger.contacts);
+
+  // Refresh display names when screen comes into focus (after editing in ChatScreen)
+  useFocusEffect(
+    React.useCallback(() => {
+      setRefreshKey(prev => prev + 1);
+    }, [])
+  );
 
   // Register user if not already registered
   const handleRegister = async () => {
@@ -84,7 +99,7 @@ export default function ContactsScreen({ navigation }: any) {
         // Decrypt any encrypted message (both incoming and our own)
         try {
           const senderPubkey = new PublicKey(lastMessage.sender);
-          const recipientPubkey = item.publicKey; // The contact is the other person
+          const recipientPubkey = contact.publicKey; // The contact is the other person
           const decrypted = messenger.decryptConversationMessage(
             lastMessage.encrypted,
             lastMessage.nonce,
@@ -100,15 +115,21 @@ export default function ContactsScreen({ navigation }: any) {
       }
     }
 
+    // Get display name from hook (custom name > domain > on-chain name > pubkey)
+    const pubkeyStr = contact.publicKey.toBase58();
+    const displayInfo = displayNames.get(pubkeyStr);
+    const displayName = displayInfo?.displayName || contact.displayName || truncateAddress(pubkeyStr, 4);
+
     return {
-      id: contact.publicKey.toBase58(),
-      displayName: contact.displayName,
-      pubkey: contact.publicKey.toBase58(),
-      state: contact.state, // Invited, Requested, Accepted, Rejected
+      id: pubkeyStr,
+      displayName,
+      pubkey: pubkeyStr,
+      publicKey: contact.publicKey,
+      state: contact.state, // Invited, Requested, Accepted, Rejected, Blocked
       lastMessage: lastMessageText,
       timestamp: lastMessage ? new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
       unread,
-      avatar: contact.avatarUrl,
+      avatar: contact.avatarUrl || '', // Emoji avatar if set
     };
   });
 
@@ -121,12 +142,18 @@ export default function ContactsScreen({ navigation }: any) {
           title={item.displayName || truncateAddress(item.pubkey, 4)}
           description="Wants to connect with you"
           left={(props) => (
-            <Avatar.Text
-              {...props}
-              size={48}
-              label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
-              style={{ backgroundColor: theme.colors.accent }}
-            />
+            item.avatar && item.avatar.length === 1 ? (
+              <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
+              </View>
+            ) : (
+              <Avatar.Text
+                {...props}
+                size={48}
+                label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+                style={{ backgroundColor: theme.colors.accent }}
+              />
+            )
           )}
           right={() => (
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -171,12 +198,18 @@ export default function ContactsScreen({ navigation }: any) {
           title={item.displayName || truncateAddress(item.pubkey, 4)}
           description="Invitation pending..."
           left={(props) => (
-            <Avatar.Text
-              {...props}
-              size={48}
-              label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
-              style={{ backgroundColor: theme.colors.textSecondary }}
-            />
+            item.avatar && item.avatar.length === 1 ? (
+              <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
+              </View>
+            ) : (
+              <Avatar.Text
+                {...props}
+                size={48}
+                label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+                style={{ backgroundColor: theme.colors.textSecondary }}
+              />
+            )
           )}
           right={() => <Text style={{ color: theme.colors.textSecondary }}>Pending</Text>}
           style={styles.contactItem}
@@ -191,12 +224,18 @@ export default function ContactsScreen({ navigation }: any) {
           title={item.displayName || truncateAddress(item.pubkey, 4)}
           description="Blocked"
           left={(props) => (
-            <Avatar.Text
-              {...props}
-              size={48}
-              label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
-              style={{ backgroundColor: '#888' }}
-            />
+            item.avatar && item.avatar.length === 1 ? (
+              <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
+              </View>
+            ) : (
+              <Avatar.Text
+                {...props}
+                size={48}
+                label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+                style={{ backgroundColor: '#888' }}
+              />
+            )
           )}
           right={() => (
             <Button
@@ -244,12 +283,18 @@ export default function ContactsScreen({ navigation }: any) {
               title={item.displayName || truncateAddress(item.pubkey, 4)}
               description={item.lastMessage}
               left={(props) => (
-                <Avatar.Text
-                  {...props}
-                  size={48}
-                  label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
-                  style={{ backgroundColor: theme.colors.primary }}
-                />
+                item.avatar && item.avatar.length === 1 ? (
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 32 }}>{item.avatar}</Text>
+                  </View>
+                ) : (
+                  <Avatar.Text
+                    {...props}
+                    size={48}
+                    label={item.displayName ? item.displayName[0].toUpperCase() : '?'}
+                    style={{ backgroundColor: theme.colors.primary }}
+                  />
+                )
               )}
               right={(props) => (
                 <View style={styles.rightContainer}>
@@ -264,6 +309,16 @@ export default function ContactsScreen({ navigation }: any) {
           </TouchableOpacity>
         }
       >
+        <Menu.Item
+          onPress={() => {
+            setMenuVisible(null);
+            setRenamingContact({ pubkey: item.pubkey, currentName: item.displayName });
+            setNewName('');
+            setRenameDialogVisible(true);
+          }}
+          title="Rename Contact"
+          leadingIcon="pencil"
+        />
         <Menu.Item
           onPress={async () => {
             setMenuVisible(null);
@@ -318,6 +373,23 @@ export default function ContactsScreen({ navigation }: any) {
     );
   };
 
+  const handleRename = async () => {
+    if (!renamingContact) return;
+
+    try {
+      const pubkey = new PublicKey(renamingContact.pubkey);
+      await setContactCustomName(pubkey, newName);
+      setRenameDialogVisible(false);
+      setRenamingContact(null);
+      setNewName('');
+
+      // Force re-render by updating refresh key
+      setRefreshKey(prev => prev + 1);
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to rename contact');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Searchbar
@@ -340,6 +412,40 @@ export default function ContactsScreen({ navigation }: any) {
         onPress={() => navigation.navigate('AddContact')}
         color={theme.colors.onPrimary}
       />
+
+      {/* Rename Contact Dialog */}
+      <Portal>
+        <Dialog visible={renameDialogVisible} onDismiss={() => setRenameDialogVisible(false)}>
+          <Dialog.Title>Rename Contact</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
+              Current: {renamingContact?.currentName}
+            </Text>
+            <TextInput
+              label="New Name"
+              value={newName}
+              onChangeText={setNewName}
+              mode="outlined"
+              placeholder="Enter custom name"
+              style={{ backgroundColor: theme.colors.surface }}
+              outlineColor={theme.colors.surface}
+              activeOutlineColor={theme.colors.primary}
+              autoFocus
+            />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setRenameDialogVisible(false)}>Cancel</Button>
+            <Button
+              onPress={handleRename}
+              mode="contained"
+              buttonColor={theme.colors.primary}
+              disabled={!newName.trim()}
+            >
+              Save
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </View>
   );
 }

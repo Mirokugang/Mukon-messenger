@@ -46,3 +46,8 @@ test-ledger/
 # Solo dev - no need to push context to remote
 CLAUDE.md
 .dev/
+
+# Build outputs (APKs)
+app/mukon-debug.apk
+app/mukon-release.apk
+app/*.apk

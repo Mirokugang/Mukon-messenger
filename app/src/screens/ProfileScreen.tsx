@@ -1,19 +1,47 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
 import { TextInput, Button, Text, Avatar, List } from 'react-native-paper';
 import { theme } from '../theme';
 import { truncateAddress } from '../utils/encryption';
 import { useWallet } from '../contexts/WalletContext';
+import { useMessenger } from '../contexts/MessengerContext';
+import EmojiPicker from '../components/EmojiPicker';
 
 export default function ProfileScreen() {
   const { publicKey, disconnect } = useWallet();
+  const messenger = useMessenger();
   const [displayName, setDisplayName] = React.useState('');
-  const [editing, setEditing] = React.useState(false);
+  const [emojiPickerVisible, setEmojiPickerVisible] = React.useState(false);
+  const [selectedEmoji, setSelectedEmoji] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (messenger.profile) {
+      setDisplayName(messenger.profile.displayName || '');
+      setSelectedEmoji(messenger.profile.avatarUrl || null);
+    }
+  }, [messenger.profile]);
+
+  const handleEmojiSelect = async (emoji: string) => {
+    setSelectedEmoji(emoji);
+
+    try {
+      // Update profile with new emoji
+      await messenger.updateProfile(displayName, emoji);
+      Alert.alert('Success', 'Avatar updated!');
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to update avatar');
+      console.error('Failed to update avatar:', error);
+    }
+  };
 
   const saveProfile = async () => {
-    // TODO: Use useMukonMessenger hook to update profile
-    console.log('Updating profile');
-    setEditing(false);
+    try {
+      await messenger.updateProfile(displayName.trim(), selectedEmoji || '');
+      Alert.alert('Success', 'Username updated!');
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to update username');
+      console.error('Failed to update profile:', error);
+    }
   };
 
   const handleDisconnect = () => {
@@ -38,25 +66,36 @@ export default function ProfileScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Avatar.Text
-          size={96}
-          label={displayName ? displayName[0].toUpperCase() : walletAddress ? walletAddress[0].toUpperCase() : '?'}
-          style={styles.avatar}
+        <TouchableOpacity onPress={() => setEmojiPickerVisible(true)}>
+          {selectedEmoji ? (
+            <View style={styles.emojiAvatar}>
+              <Text style={styles.emojiAvatarText}>{selectedEmoji}</Text>
+            </View>
+          ) : (
+            <Avatar.Text
+              size={96}
+              label={displayName ? displayName[0].toUpperCase() : walletAddress ? walletAddress[0].toUpperCase() : '?'}
+              style={styles.avatar}
+            />
+          )}
+          <Text style={styles.changeAvatarText}>Tap to change avatar</Text>
+        </TouchableOpacity>
+
+        <TextInput
+          value={displayName}
+          onChangeText={setDisplayName}
+          mode="outlined"
+          placeholder="Enter display name"
+          label="Username"
+          style={styles.nameInput}
+          outlineColor={theme.colors.surface}
+          activeOutlineColor={theme.colors.primary}
         />
-        {editing ? (
-          <TextInput
-            value={displayName}
-            onChangeText={setDisplayName}
-            mode="outlined"
-            placeholder="Display name (optional)"
-            style={styles.nameInput}
-            outlineColor={theme.colors.surface}
-            activeOutlineColor={theme.colors.primary}
-          />
-        ) : displayName ? (
-          <Text style={styles.name}>{displayName}</Text>
-        ) : null}
         <Text style={styles.pubkey}>{truncateAddress(walletAddress, 6)}</Text>
+        <Text style={styles.skrHint}>
+          {/* TODO: Add .skr reverse lookup on mainnet */}
+          Your .skr domain will show here on mainnet
+        </Text>
       </View>
 
       <List.Section style={styles.section}>
@@ -79,7 +118,7 @@ export default function ProfileScreen() {
         />
         <List.Item
           title="On-Chain Contacts"
-          description="Contact list encrypted via Arcium"
+          description="Contact list stored on Solana"
           left={(props) => <List.Icon {...props} icon="shield-check" color={theme.colors.secondary} />}
           style={styles.listItem}
         />
@@ -87,11 +126,11 @@ export default function ProfileScreen() {
 
       <Button
         mode="contained"
-        onPress={editing ? saveProfile : () => setEditing(true)}
+        onPress={saveProfile}
         style={styles.button}
         buttonColor={theme.colors.primary}
       >
-        {editing ? 'Save Profile' : 'Edit Profile'}
+        Update Username
       </Button>
 
       <Button
@@ -103,7 +142,13 @@ export default function ProfileScreen() {
         Disconnect Wallet
       </Button>
 
-      <Text style={styles.version}>Mukon Messenger v1.0.0</Text>
+      <Text style={styles.version}>Mukon Messenger v1.0.0-alpha</Text>
+
+      <EmojiPicker
+        visible={emojiPickerVisible}
+        onDismiss={() => setEmojiPickerVisible(false)}
+        onSelect={handleEmojiSelect}
+      />
     </ScrollView>
   );
 }
@@ -119,7 +164,24 @@ const styles = StyleSheet.create({
   },
   avatar: {
     backgroundColor: theme.colors.primary,
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  emojiAvatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  emojiAvatarText: {
+    fontSize: 60,
+  },
+  changeAvatarText: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    marginBottom: 12,
   },
   name: {
     fontSize: 24,
@@ -128,13 +190,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   nameInput: {
-    width: 200,
-    marginBottom: 8,
+    width: '80%',
+    marginBottom: 12,
+    marginTop: 8,
     backgroundColor: theme.colors.surface,
   },
   pubkey: {
     fontSize: 14,
     color: theme.colors.textSecondary,
+    marginBottom: 4,
+  },
+  skrHint: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic',
   },
   section: {
     marginTop: 16,

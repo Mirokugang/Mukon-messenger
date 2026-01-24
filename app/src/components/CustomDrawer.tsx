@@ -4,10 +4,15 @@ import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { Avatar, Text, Divider, List } from 'react-native-paper';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
+import { useMessenger } from '../contexts/MessengerContext';
 import { truncateAddress } from '../utils/encryption';
 
 export default function CustomDrawer({ navigation }: any) {
   const wallet = useWallet();
+  const messenger = useMessenger();
+
+  const avatarUrl = messenger.profile?.avatarUrl;
+  const displayName = messenger.profile?.displayName;
 
   return (
     <DrawerContentScrollView style={styles.container}>
@@ -16,11 +21,20 @@ export default function CustomDrawer({ navigation }: any) {
         style={styles.profileSection}
         onPress={() => navigation.navigate('Profile')}
       >
-        <Avatar.Icon
-          size={64}
-          icon="account-circle"
-          style={styles.avatar}
-        />
+        {avatarUrl && avatarUrl.length === 1 ? (
+          <View style={styles.emojiAvatar}>
+            <Text style={styles.emojiAvatarText}>{avatarUrl}</Text>
+          </View>
+        ) : (
+          <Avatar.Icon
+            size={64}
+            icon="account-circle"
+            style={styles.avatar}
+          />
+        )}
+        {displayName && (
+          <Text style={styles.displayName}>{displayName}</Text>
+        )}
         <Text style={styles.walletAddress}>
           {wallet.publicKey ? truncateAddress(wallet.publicKey.toBase58(), 6) : 'Not connected'}
         </Text>
@@ -102,10 +116,27 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary,
     marginBottom: 12,
   },
-  walletAddress: {
-    fontSize: 16,
+  emojiAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emojiAvatarText: {
+    fontSize: 40,
+  },
+  displayName: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: theme.colors.textPrimary,
+    marginBottom: 4,
+  },
+  walletAddress: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
   },
   divider: {
     backgroundColor: theme.colors.surface,

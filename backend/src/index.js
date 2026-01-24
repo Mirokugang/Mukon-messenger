@@ -134,27 +134,32 @@ io.on('connection', (socket) => {
     console.log(`${socket.publicKey} left conversation: ${conversationId}`);
   });
 
-  socket.on('send_message', ({ conversationId, content, encrypted, nonce, sender, timestamp }) => {
-    if (!socket.publicKey) {
+  socket.on('send_message', ({ conversationId, content, encrypted, nonce, sender, timestamp, type, replyTo }) => {
+    if (!socket.publicKey && type !== 'system') {
       socket.emit('error', { message: 'Not authenticated' });
       return;
     }
 
     const messageData = {
-      id: Date.now().toString(),
+      id: Date.now().toString() + Math.random(),
       conversationId, // Include conversationId so client knows where to add it
       sender: sender || socket.publicKey,
-      timestamp: timestamp || Date.now()
+      timestamp: timestamp || Date.now(),
+      type: type || 'message', // 'message' or 'system'
+      replyTo: replyTo || null // Reply reference (message ID being replied to)
     };
 
-    // Handle both encrypted and plain text messages
-    if (encrypted && nonce) {
+    // Handle encrypted messages, plain text messages, or system messages
+    if (type === 'system') {
+      messageData.content = content;
+      console.log(`📢 System message sent in ${conversationId.slice(0, 8)}...: ${content}`);
+    } else if (encrypted && nonce) {
       messageData.encrypted = encrypted;
       messageData.nonce = nonce;
-      console.log(`Encrypted message sent in ${conversationId}`);
+      console.log(`📨 Encrypted message sent in ${conversationId.slice(0, 8)}...`);
     } else if (content) {
       messageData.content = content;
-      console.log(`Plain text message sent in ${conversationId}:`, content);
+      console.log(`📝 Plain text message sent in ${conversationId.slice(0, 8)}...: ${content}`);
     } else {
       socket.emit('error', { message: 'Message must have either content or encrypted data' });
       return;
@@ -190,6 +195,40 @@ io.on('connection', (socket) => {
       console.log(`Message ${messageId} deleted for everyone in ${conversationId}`);
     }
     // If deleteForBoth is false, client handles local deletion only
+  });
+
+  socket.on('add_reaction', ({ conversationId, messageId, emoji, userId }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    // Find the message and add reaction
+    const msgs = messages.get(conversationId) || [];
+    const message = msgs.find(m => m.id === messageId);
+
+    if (message) {
+      if (!message.reactions) {
+        message.reactions = {};
+      }
+      if (!message.reactions[emoji]) {
+        message.reactions[emoji] = [];
+      }
+
+      // Add user to reaction list if not already there
+      if (!message.reactions[emoji].includes(userId)) {
+        message.reactions[emoji].push(userId);
+      }
+
+      // Broadcast updated reactions to everyone in conversation
+      io.to(conversationId).emit('reaction_updated', {
+        conversationId,
+        messageId,
+        reactions: message.reactions
+      });
+
+      console.log(`Reaction ${emoji} added to message ${messageId} by ${userId}`);
+    }
   });
 
   socket.on('typing', ({ conversationId }) => {

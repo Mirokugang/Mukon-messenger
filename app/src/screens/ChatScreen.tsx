@@ -1,17 +1,28 @@
 import React from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
-import { TextInput, IconButton, Text, Avatar, Menu } from 'react-native-paper';
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity, Alert } from 'react-native';
+import { TextInput, IconButton, Text, Avatar, Menu, Dialog, Portal, Button } from 'react-native-paper';
+import * as Clipboard from 'expo-clipboard';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
 import { getChatHash } from '../utils/encryption';
+import { getContactCustomName, getCachedDomain, setContactCustomName } from '../utils/domains';
+import ReactionPicker from '../components/ReactionPicker';
 
 export default function ChatScreen({ route, navigation }: any) {
   const { contact } = route.params;
   const [message, setMessage] = React.useState('');
   const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
+  const [deleteMenuVisible, setDeleteMenuVisible] = React.useState<string | null>(null);
+  const [displayName, setDisplayName] = React.useState(contact.displayName || contact.pubkey);
+  const [renameDialogVisible, setRenameDialogVisible] = React.useState(false);
+  const [newName, setNewName] = React.useState('');
+  const [reactionPickerVisible, setReactionPickerVisible] = React.useState(false);
+  const [reactingToMessageId, setReactingToMessageId] = React.useState<string | null>(null);
+  const [replyToMessage, setReplyToMessage] = React.useState<any>(null);
+  const [quickReactVisible, setQuickReactVisible] = React.useState<string | null>(null);
   const wallet = useWallet();
   const messenger = useMessenger();
   const flatListRef = React.useRef<FlatList>(null);
@@ -40,7 +51,20 @@ export default function ChatScreen({ route, navigation }: any) {
 
   const messages = conversationMessages.map((msg: any, idx: number) => {
     const isMe = msg.sender === wallet.publicKey?.toBase58();
+    const isSystem = msg.type === 'system';
     let content = msg.content;
+
+    // System messages are always plaintext
+    if (isSystem) {
+      return {
+        id: msg.id || `${idx}`,
+        sender: msg.sender,
+        content,
+        timestamp: new Date(msg.timestamp || Date.now()),
+        isMe: false,
+        isSystem: true,
+      };
+    }
 
     // Decrypt if message is encrypted and we don't have plaintext
     if (!content && msg.encrypted && msg.nonce) {
@@ -68,33 +92,119 @@ export default function ChatScreen({ route, navigation }: any) {
       content = '[No content]';
     }
 
+    // Find replied-to message if this is a reply
+    let repliedToContent = null;
+    if (msg.replyTo) {
+      const repliedMsg = conversationMessages.find((m: any) => m.id === msg.replyTo);
+      if (repliedMsg) {
+        // Decrypt replied message if needed
+        if (repliedMsg.content) {
+          repliedToContent = repliedMsg.content;
+        } else if (repliedMsg.encrypted && repliedMsg.nonce) {
+          try {
+            const repliedIsMe = repliedMsg.sender === wallet.publicKey?.toBase58();
+            const repliedSenderPubkey = new PublicKey(repliedMsg.sender);
+            const repliedRecipientPubkey = repliedIsMe
+              ? new PublicKey(contact.pubkey)
+              : wallet.publicKey!;
+            repliedToContent = messenger.decryptConversationMessage(
+              repliedMsg.encrypted,
+              repliedMsg.nonce,
+              repliedSenderPubkey,
+              repliedRecipientPubkey
+            ) || '[Unable to decrypt]';
+          } catch {
+            repliedToContent = '[Unable to decrypt]';
+          }
+        }
+      }
+    }
+
     return {
       id: msg.id || `${idx}`,
       sender: msg.sender,
       content,
       timestamp: new Date(msg.timestamp || Date.now()),
       isMe,
+      isSystem: false,
+      replyTo: msg.replyTo,
+      repliedToContent,
+      reactions: msg.reactions || {},
     };
   });
+
+  // Load custom/domain name for contact
+  React.useEffect(() => {
+    const loadContactName = async () => {
+      const pubkey = new PublicKey(contact.pubkey);
+
+      // Try custom name first
+      const customName = await getContactCustomName(pubkey);
+      if (customName) {
+        setDisplayName(customName);
+        return;
+      }
+
+      // Try cached domain
+      const cachedDomain = await getCachedDomain(pubkey);
+      if (cachedDomain) {
+        const domainDisplay = cachedDomain.endsWith('.sol') || cachedDomain.endsWith('.skr')
+          ? cachedDomain
+          : `${cachedDomain}.sol`;
+        setDisplayName(domainDisplay);
+        return;
+      }
+
+      // Use contact.displayName or pubkey
+      setDisplayName(contact.displayName || contact.pubkey);
+    };
+
+    loadContactName();
+  }, [contact]);
+
+  const handleRename = async () => {
+    if (!newName.trim()) return;
+
+    try {
+      const pubkey = new PublicKey(contact.pubkey);
+      await setContactCustomName(pubkey, newName);
+      setDisplayName(newName);
+      setRenameDialogVisible(false);
+      setNewName('');
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to rename contact');
+    }
+  };
 
   React.useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitle}>
           <Text style={styles.headerName}>
-            {contact.displayName || contact.pubkey}
+            {displayName}
           </Text>
         </View>
       ),
       headerRight: () => (
-        <IconButton
-          icon="lock"
-          size={20}
-          iconColor={theme.colors.secondary}
-        />
+        <View style={{ flexDirection: 'row' }}>
+          <IconButton
+            icon="pencil"
+            size={20}
+            iconColor={theme.colors.textSecondary}
+            onPress={() => {
+              setNewName('');
+              setRenameDialogVisible(true);
+            }}
+          />
+          <IconButton
+            icon="lock"
+            size={20}
+            iconColor={theme.colors.secondary}
+          />
+        </View>
       ),
     });
-  }, [navigation, contact]);
+  }, [navigation, displayName]);
 
   const sendMessage = async () => {
     if (!message.trim() || !wallet.publicKey) return;
@@ -103,9 +213,11 @@ export default function ChatScreen({ route, navigation }: any) {
       await messenger.sendMessage(
         conversationId,
         message.trim(),
-        new PublicKey(contact.pubkey)
+        new PublicKey(contact.pubkey),
+        replyToMessage?.id // Pass reply-to message ID if replying
       );
       setMessage('');
+      clearReply(); // Clear reply after sending
     } catch (error) {
       console.error('Failed to send message:', error);
     }
@@ -114,39 +226,213 @@ export default function ChatScreen({ route, navigation }: any) {
   const handleDeleteMessage = (messageId: string, deleteForBoth: boolean) => {
     messenger.deleteMessage(conversationId, messageId, deleteForBoth);
     setMenuVisible(null);
+    setDeleteMenuVisible(null);
+    setQuickReactVisible(null);
   };
 
-  const renderMessage = ({ item }: any) => (
-    <Menu
-      visible={menuVisible === item.id}
-      onDismiss={() => setMenuVisible(null)}
-      anchor={
-        <TouchableOpacity
-          onLongPress={() => setMenuVisible(item.id)}
-          style={[
-            styles.messageBubble,
-            item.isMe ? styles.myMessage : styles.theirMessage,
-          ]}
-        >
-          <Text style={styles.messageText}>{item.content}</Text>
-          <Text style={styles.messageTime}>
+  const handleReaction = (emoji: string) => {
+    if (!reactingToMessageId) return;
+
+    // TODO: Send reaction to backend
+    messenger.socket?.emit('add_reaction', {
+      conversationId,
+      messageId: reactingToMessageId,
+      emoji,
+      userId: wallet.publicKey?.toBase58(),
+    });
+
+    setReactingToMessageId(null);
+  };
+
+  const handleReply = (messageToReply: any) => {
+    setReplyToMessage(messageToReply);
+    setMenuVisible(null);
+  };
+
+  const handleCopyMessage = async (content: string) => {
+    await Clipboard.setStringAsync(content);
+    Alert.alert('Copied', 'Message copied to clipboard');
+    setMenuVisible(null);
+  };
+
+  const handlePinMessage = (messageId: string) => {
+    // TODO: Implement pinning functionality
+    Alert.alert('Coming Soon', 'Message pinning will be added soon');
+    setMenuVisible(null);
+  };
+
+  const handleQuickReact = (messageId: string, emoji: string) => {
+    messenger.socket?.emit('add_reaction', {
+      conversationId,
+      messageId,
+      emoji,
+      userId: wallet.publicKey?.toBase58(),
+    });
+    setQuickReactVisible(null);
+    setMenuVisible(null);
+  };
+
+  const clearReply = () => {
+    setReplyToMessage(null);
+  };
+
+  const renderMessage = ({ item }: any) => {
+    // System messages (invitations, acceptances, etc.)
+    if (item.isSystem) {
+      return (
+        <View style={styles.systemMessageContainer}>
+          <Text style={styles.systemMessage}>{item.content}</Text>
+          <Text style={styles.systemTimestamp}>
             {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
-        </TouchableOpacity>
-      }
-    >
-      <Menu.Item
-        onPress={() => handleDeleteMessage(item.id, false)}
-        title="Delete for Me"
-      />
-      {item.isMe && (
-        <Menu.Item
-          onPress={() => handleDeleteMessage(item.id, true)}
-          title="Delete for Everyone"
-        />
-      )}
-    </Menu>
-  );
+        </View>
+      );
+    }
+
+    // Regular encrypted messages with avatar for incoming messages
+    const showAvatar = !item.isMe && contact.avatar && contact.avatar.length === 1;
+
+    return (
+      <View style={[styles.messageRow, item.isMe ? styles.myMessageRow : styles.theirMessageRow]}>
+        {/* Avatar for incoming messages only */}
+        {showAvatar && (
+          <View style={styles.messageAvatar}>
+            <Text style={styles.messageAvatarEmoji}>{contact.avatar}</Text>
+          </View>
+        )}
+
+        <View>
+          {/* Quick React Row (Telegram-style) */}
+          {quickReactVisible === item.id && (
+            <View style={styles.quickReactBar}>
+              {['❤️', '🔥', '💯', '😂', '👍', '👎'].map((emoji) => (
+                <TouchableOpacity
+                  key={emoji}
+                  style={styles.quickReactButton}
+                  onPress={() => handleQuickReact(item.id, emoji)}
+                >
+                  <Text style={styles.quickReactEmoji}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <Menu
+            visible={menuVisible === item.id}
+            onDismiss={() => {
+              setMenuVisible(null);
+              setQuickReactVisible(null);
+            }}
+            anchor={
+              <TouchableOpacity
+                onLongPress={() => {
+                  setQuickReactVisible(item.id);
+                  setMenuVisible(item.id);
+                }}
+                style={[
+                  styles.messageBubble,
+                  item.isMe ? styles.myMessage : styles.theirMessage,
+                ]}
+              >
+                {/* Replied message preview */}
+                {item.repliedToContent && (
+                  <View style={styles.repliedMessage}>
+                    <View style={styles.replyBar} />
+                    <Text style={styles.repliedText} numberOfLines={2}>
+                      {item.repliedToContent}
+                    </Text>
+                  </View>
+                )}
+
+                <Text style={styles.messageText}>{item.content}</Text>
+
+                {/* Reactions display */}
+                {item.reactions && Object.keys(item.reactions).length > 0 && (
+                  <View style={styles.reactionsContainer}>
+                    {Object.entries(item.reactions).map(([emoji, users]: [string, any]) => (
+                      users.length > 0 && (
+                        <View key={emoji} style={styles.reactionBubble}>
+                          <Text style={styles.reactionEmoji}>{emoji}</Text>
+                          {users.length > 1 && (
+                            <Text style={styles.reactionCount}>{users.length}</Text>
+                          )}
+                        </View>
+                      )
+                    ))}
+                  </View>
+                )}
+
+                <Text style={styles.messageTime}>
+                  {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+              </TouchableOpacity>
+            }
+          >
+            <Menu.Item
+              onPress={() => {
+                setReactingToMessageId(item.id);
+                setReactionPickerVisible(true);
+                setMenuVisible(null);
+                setQuickReactVisible(null);
+              }}
+              title="React"
+              leadingIcon="emoticon-happy-outline"
+            />
+            <Menu.Item
+              onPress={() => handleReply(item)}
+              title="Reply"
+              leadingIcon="reply"
+            />
+            <Menu.Item
+              onPress={() => handleCopyMessage(item.content)}
+              title="Copy Message"
+              leadingIcon="content-copy"
+            />
+            <Menu.Item
+              onPress={() => handlePinMessage(item.id)}
+              title="Pin Message"
+              leadingIcon="pin"
+            />
+            <Menu.Item
+              onPress={() => {
+                setMenuVisible(null);
+                setQuickReactVisible(null);
+                setDeleteMenuVisible(item.id);
+              }}
+              title="Delete"
+              leadingIcon="delete"
+            />
+          </Menu>
+
+          {/* Delete Submenu */}
+          <Menu
+            visible={deleteMenuVisible === item.id}
+            onDismiss={() => setDeleteMenuVisible(null)}
+            anchor={<View />}
+          >
+            <Menu.Item
+              onPress={() => {
+                handleDeleteMessage(item.id, false);
+                setDeleteMenuVisible(null);
+              }}
+              title="Delete for Me"
+              leadingIcon="delete-outline"
+            />
+            {item.isMe && (
+              <Menu.Item
+                onPress={() => {
+                  handleDeleteMessage(item.id, true);
+                  setDeleteMenuVisible(null);
+                }}
+                title="Delete for Everyone"
+                leadingIcon="delete-forever"
+              />
+            )}
+          </Menu>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <KeyboardAvoidingView
@@ -164,6 +450,24 @@ export default function ChatScreen({ route, navigation }: any) {
         onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
       />
       <View style={styles.inputContainer}>
+        {/* Reply preview */}
+        {replyToMessage && (
+          <View style={styles.replyPreview}>
+            <View style={styles.replyContent}>
+              <Text style={styles.replyLabel}>Replying to</Text>
+              <Text style={styles.replyText} numberOfLines={1}>
+                {replyToMessage.content}
+              </Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={20}
+              onPress={clearReply}
+              iconColor={theme.colors.textSecondary}
+            />
+          </View>
+        )}
+
         <TextInput
           value={message}
           onChangeText={setMessage}
@@ -182,6 +486,47 @@ export default function ChatScreen({ route, navigation }: any) {
           }
         />
       </View>
+
+      {/* Rename Contact Dialog */}
+      <Portal>
+        <Dialog visible={renameDialogVisible} onDismiss={() => setRenameDialogVisible(false)}>
+          <Dialog.Title>Rename Contact</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
+              Current: {displayName}
+            </Text>
+            <TextInput
+              label="New Name"
+              value={newName}
+              onChangeText={setNewName}
+              mode="outlined"
+              placeholder="Enter custom name"
+              style={{ backgroundColor: theme.colors.surface }}
+              outlineColor={theme.colors.surface}
+              activeOutlineColor={theme.colors.primary}
+              autoFocus
+            />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setRenameDialogVisible(false)}>Cancel</Button>
+            <Button
+              onPress={handleRename}
+              mode="contained"
+              buttonColor={theme.colors.primary}
+              disabled={!newName.trim()}
+            >
+              Save
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      {/* Reaction Picker */}
+      <ReactionPicker
+        visible={reactionPickerVisible}
+        onDismiss={() => setReactionPickerVisible(false)}
+        onSelect={handleReaction}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -204,18 +549,42 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'flex-end',
   },
+  messageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginVertical: 4,
+    maxWidth: '80%',
+  },
+  myMessageRow: {
+    alignSelf: 'flex-end',
+    justifyContent: 'flex-end',
+  },
+  theirMessageRow: {
+    alignSelf: 'flex-start',
+    justifyContent: 'flex-start',
+  },
+  messageAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  messageAvatarEmoji: {
+    fontSize: 20,
+  },
   messageBubble: {
-    maxWidth: '75%',
+    maxWidth: '100%',
     padding: 12,
     borderRadius: 16,
-    marginVertical: 4,
   },
   myMessage: {
-    alignSelf: 'flex-end',
     backgroundColor: theme.colors.primary,
   },
   theirMessage: {
-    alignSelf: 'flex-start',
     backgroundColor: theme.colors.surface,
   },
   messageText: {
@@ -236,5 +605,111 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: theme.colors.background,
+  },
+  replyPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  replyContent: {
+    flex: 1,
+  },
+  replyLabel: {
+    color: theme.colors.primary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  replyText: {
+    color: theme.colors.textSecondary,
+    fontSize: 14,
+    marginTop: 2,
+  },
+  systemMessageContainer: {
+    alignItems: 'center',
+    marginVertical: 8,
+    paddingHorizontal: 16,
+  },
+  systemMessage: {
+    color: theme.colors.textSecondary,
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  systemTimestamp: {
+    color: theme.colors.textSecondary,
+    fontSize: 10,
+    marginTop: 4,
+  },
+  repliedMessage: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderLeftWidth: 3,
+    borderLeftColor: theme.colors.secondary,
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginBottom: 8,
+    borderRadius: 4,
+  },
+  replyBar: {
+    width: 3,
+    backgroundColor: theme.colors.secondary,
+    marginRight: 8,
+  },
+  repliedText: {
+    flex: 1,
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  reactionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  reactionBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    gap: 2,
+  },
+  reactionEmoji: {
+    fontSize: 16,
+  },
+  reactionCount: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
+  quickReactBar: {
+    flexDirection: 'row',
+    backgroundColor: theme.colors.surface,
+    borderRadius: 24,
+    padding: 8,
+    marginBottom: 8,
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  quickReactButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  quickReactEmoji: {
+    fontSize: 24,
   },
 });

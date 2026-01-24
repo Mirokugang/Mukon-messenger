@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, StyleSheet, Alert } from 'react-native';
 import { TextInput, Button, Text, IconButton } from 'react-native-paper';
-import { PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
+import { resolveDomain, isDomain, cacheResolvedDomain } from '../utils/domains';
 
 export default function AddContactScreen({ navigation }: any) {
   const wallet = useWallet();
@@ -17,15 +18,114 @@ export default function AddContactScreen({ navigation }: any) {
 
     setLoading(true);
     try {
-      // Validate and parse the address
-      const contactPubkey = new PublicKey(address.trim());
+      let contactPubkey: PublicKey;
+      let resolvedDomain: string | undefined;
+
+      // Check if input is a domain name
+      if (isDomain(address)) {
+        console.log('Resolving domain:', address);
+
+        // Create connection for domain resolution (domains are on mainnet!)
+        const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+
+        // Resolve domain to pubkey
+        const resolved = await resolveDomain(address, connection);
+
+        if (!resolved) {
+          Alert.alert(
+            'Domain Not Found',
+            `Could not resolve ${address}. Please check the domain name and try again.`
+          );
+          setLoading(false);
+          return;
+        }
+
+        contactPubkey = resolved.publicKey;
+        resolvedDomain = resolved.domain;
+
+        // Cache the domain for later display
+        await cacheResolvedDomain(contactPubkey, resolvedDomain);
+
+        console.log(`Resolved ${address} to ${contactPubkey.toBase58()}`);
+      } else {
+        // Direct public key input
+        contactPubkey = new PublicKey(address.trim());
+      }
+
+      // Check if already in contacts
+      const existingContact = messenger.contacts.find(
+        c => c.publicKey.toBase58() === contactPubkey.toBase58()
+      );
+
+      if (existingContact) {
+        const displayName = resolvedDomain
+          ? `${resolvedDomain}.sol`
+          : `${contactPubkey.toBase58().slice(0, 8)}...`;
+
+        let message = '';
+        let action = '';
+
+        switch (existingContact.state) {
+          case 'Invited':
+            message = `You already sent an invitation to ${displayName}. Waiting for them to accept.`;
+            break;
+          case 'Requested':
+            message = `${displayName} already invited you! Go to your contacts to accept.`;
+            break;
+          case 'Accepted':
+            message = `${displayName} is already in your contacts.`;
+            break;
+          case 'Rejected':
+            message = `You previously deleted ${displayName}. Do you want to re-invite them?`;
+            action = 'Re-invite';
+            break;
+          case 'Blocked':
+            message = `${displayName} is blocked. Unblock them first from your contacts.`;
+            break;
+        }
+
+        if (action === 'Re-invite') {
+          Alert.alert('Contact Previously Deleted', message, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Re-invite',
+              onPress: async () => {
+                try {
+                  const tx = await messenger.invite(contactPubkey);
+                  Alert.alert('Invitation Sent!', `Re-invited ${displayName}`, [
+                    {
+                      text: 'OK',
+                      onPress: () => {
+                        messenger.loadContacts();
+                        navigation.goBack();
+                      },
+                    },
+                  ]);
+                } catch (err: any) {
+                  Alert.alert('Error', err.message);
+                }
+                setLoading(false);
+              },
+            },
+          ]);
+          return;
+        } else {
+          Alert.alert('Already in Contacts', message);
+          setLoading(false);
+          return;
+        }
+      }
 
       // Send invitation on-chain
       const tx = await messenger.invite(contactPubkey);
 
+      const displayName = resolvedDomain
+        ? `${resolvedDomain}.sol`
+        : `${contactPubkey.toBase58().slice(0, 8)}...`;
+
       Alert.alert(
         'Invitation Sent!',
-        `Invitation sent to ${address.slice(0, 8)}...\n\nTransaction: ${tx.slice(0, 8)}...`,
+        `Invitation sent to ${displayName}\n\nTransaction: ${tx.slice(0, 8)}...`,
         [
           {
             text: 'OK',
@@ -39,10 +139,16 @@ export default function AddContactScreen({ navigation }: any) {
       );
     } catch (error: any) {
       console.error('Failed to send invitation:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to send invitation. Please check the address and try again.'
-      );
+
+      // Parse error message for better UX
+      let errorMsg = 'Failed to send invitation.';
+      if (error.message?.includes('AlreadyInvited')) {
+        errorMsg = 'This contact is already in your list. Check your contacts or pending invitations.';
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+
+      Alert.alert('Error', errorMsg);
     } finally {
       setLoading(false);
     }
@@ -50,11 +156,11 @@ export default function AddContactScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>Enter wallet address or .sol</Text>
+      <Text style={styles.label}>Enter wallet address, .sol or .skr domain</Text>
       <TextInput
         value={address}
         onChangeText={setAddress}
-        placeholder="7xKp..."
+        placeholder="alice.sol or 7xKp..."
         mode="outlined"
         style={styles.input}
         outlineColor={theme.colors.surface}
