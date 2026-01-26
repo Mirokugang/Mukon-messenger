@@ -58,6 +58,13 @@ export default function CustomDrawer({ navigation }: any) {
       />
 
       <List.Item
+        title="New Group"
+        left={(props) => <List.Icon {...props} icon="account-group-outline" color={theme.colors.secondary} />}
+        onPress={() => navigation.navigate('CreateGroup')}
+        titleStyle={styles.menuItem}
+      />
+
+      <List.Item
         title="Saved Messages"
         left={(props) => <List.Icon {...props} icon="bookmark" color={theme.colors.primary} />}
         onPress={() => {
@@ -73,7 +80,7 @@ export default function CustomDrawer({ navigation }: any) {
         title="Settings"
         left={(props) => <List.Icon {...props} icon="cog" color={theme.colors.textSecondary} />}
         onPress={() => {
-          // TODO: Navigate to settings
+          navigation.navigate('Settings');
           navigation.closeDrawer();
         }}
         titleStyle={styles.menuItem}

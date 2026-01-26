@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, FlatList, StyleSheet, Alert, TouchableOpacity } from 'react-native';
-import { List, FAB, Searchbar, Avatar, Badge, Text, Button, Menu, Dialog, Portal, TextInput } from 'react-native-paper';
+import { View, FlatList, StyleSheet, Alert, TouchableOpacity, ScrollView } from 'react-native';
+import { List, FAB, Searchbar, Avatar, Badge, Text, Button, Menu, Dialog, Portal, TextInput, Chip } from 'react-native-paper';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,6 +10,8 @@ import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
 import { useContactNames } from '../hooks/useContactNames';
 import { setContactCustomName, getContactCustomName, getCachedDomain } from '../utils/domains';
+
+type FilterType = 'All' | 'DMs' | 'Groups' | 'Unread';
 
 export default function ContactsScreen({ navigation }: any) {
   const wallet = useWallet();
@@ -21,6 +23,7 @@ export default function ContactsScreen({ navigation }: any) {
   const [renamingContact, setRenamingContact] = React.useState<{ pubkey: string; currentName: string } | null>(null);
   const [newName, setNewName] = React.useState('');
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [filter, setFilter] = React.useState<FilterType>('All');
   const displayNames = useContactNames(messenger.contacts);
 
   // Refresh display names when screen comes into focus (after editing in ChatScreen)
@@ -134,6 +137,40 @@ export default function ContactsScreen({ navigation }: any) {
   });
 
   const renderContact = ({ item }: any) => {
+    // Handle groups differently
+    if (item.type === 'group') {
+      return (
+        <TouchableOpacity
+          onPress={() => navigation.navigate('GroupChat', {
+            groupId: item.id,
+            groupName: item.displayName,
+          })}
+        >
+          <List.Item
+            title={item.displayName}
+            description={item.lastMessage || 'Tap to open group'}
+            left={(props) => (
+              <Avatar.Icon
+                {...props}
+                size={48}
+                icon="account-group"
+                style={{ backgroundColor: theme.colors.secondary }}
+              />
+            )}
+            right={(props) => (
+              <View style={styles.rightContainer}>
+                {item.timestamp && <Text style={styles.timestamp}>{item.timestamp}</Text>}
+                {item.unread > 0 && (
+                  <Badge style={styles.badge}>{item.unread}</Badge>
+                )}
+              </View>
+            )}
+            style={styles.contactItem}
+          />
+        </TouchableOpacity>
+      );
+    }
+
     // Show different UI based on peer state
     if (item.state === 'Requested') {
       // They invited you - show Accept/Decline buttons
@@ -390,27 +427,103 @@ export default function ContactsScreen({ navigation }: any) {
     }
   };
 
+  // Combine DMs and Groups into unified list
+  const allConversations = [
+    ...contacts.map(c => ({ ...c, type: 'dm' as const })),
+    ...messenger.groups.map(g => ({
+      id: Buffer.from(g.groupId).toString('hex'),
+      displayName: g.name,
+      pubkey: '',
+      type: 'group' as const,
+      state: 'Accepted',
+      lastMessage: '', // TODO: Get last group message
+      timestamp: '',
+      unread: 0, // TODO: Track group unread counts
+      avatar: '', // TODO: Group emoji avatar
+      group: g,
+    })),
+  ];
+
+  // Apply filter
+  const filteredConversations = allConversations.filter(item => {
+    if (filter === 'DMs') return item.type === 'dm';
+    if (filter === 'Groups') return item.type === 'group';
+    if (filter === 'Unread') return item.unread > 0;
+    return true; // 'All'
+  });
+
   return (
     <View style={styles.container}>
       <Searchbar
-        placeholder="Search contacts..."
+        placeholder="Search conversations..."
         onChangeText={setSearchQuery}
         value={searchQuery}
         style={styles.searchbar}
         iconColor={theme.colors.textSecondary}
         placeholderTextColor={theme.colors.textSecondary}
       />
+
+      {/* Filter Chips */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipContainer}
+      >
+        <Chip
+          selected={filter === 'All'}
+          onPress={() => setFilter('All')}
+          style={styles.chip}
+          textStyle={filter === 'All' ? styles.chipTextSelected : styles.chipText}
+        >
+          All
+        </Chip>
+        <Chip
+          selected={filter === 'DMs'}
+          onPress={() => setFilter('DMs')}
+          style={styles.chip}
+          textStyle={filter === 'DMs' ? styles.chipTextSelected : styles.chipText}
+        >
+          DMs
+        </Chip>
+        <Chip
+          selected={filter === 'Groups'}
+          onPress={() => setFilter('Groups')}
+          style={styles.chip}
+          textStyle={filter === 'Groups' ? styles.chipTextSelected : styles.chipText}
+        >
+          Groups
+        </Chip>
+        <Chip
+          selected={filter === 'Unread'}
+          onPress={() => setFilter('Unread')}
+          style={styles.chip}
+          textStyle={filter === 'Unread' ? styles.chipTextSelected : styles.chipText}
+        >
+          Unread
+        </Chip>
+      </ScrollView>
+
       <FlatList
-        data={contacts}
+        data={filteredConversations}
         renderItem={renderContact}
         keyExtractor={(item) => item.id}
         style={styles.list}
       />
+
+      {/* Two FABs - Add Contact and Create Group */}
       <FAB
         icon="plus"
         style={styles.fab}
         onPress={() => navigation.navigate('AddContact')}
         color={theme.colors.onPrimary}
+        label="Contact"
+      />
+      <FAB
+        icon="account-group"
+        style={styles.fabGroup}
+        onPress={() => navigation.navigate('CreateGroup')}
+        color={theme.colors.onPrimary}
+        label="Group"
       />
 
       {/* Rename Contact Dialog */}
@@ -457,7 +570,22 @@ const styles = StyleSheet.create({
   },
   searchbar: {
     margin: 16,
+    marginBottom: 8,
     backgroundColor: theme.colors.surface,
+  },
+  chipContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  chip: {
+    marginRight: 8,
+  },
+  chipText: {
+    color: theme.colors.textSecondary,
+  },
+  chipTextSelected: {
+    color: theme.colors.primary,
   },
   list: {
     flex: 1,
@@ -488,8 +616,14 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 16,
-    bottom: 16,
+    bottom: 88, // Stack above group FAB
     backgroundColor: theme.colors.primary,
+  },
+  fabGroup: {
+    position: 'absolute',
+    right: 16,
+    bottom: 16,
+    backgroundColor: theme.colors.secondary,
   },
   registrationContainer: {
     flex: 1,

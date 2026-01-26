@@ -25,6 +25,9 @@ app.use(express.json());
 // In-memory storage (replace with Redis/DB in production)
 const messages = new Map(); // conversationId -> Message[]
 const onlineUsers = new Map(); // pubkey -> socket.id
+// Group storage
+const groupMessages = new Map(); // groupId -> Message[]
+const groupRooms = new Map(); // groupId -> Set<socket.id>
 
 // Verify wallet signature
 function verifySignature(publicKey, message, signature) {
@@ -102,6 +105,21 @@ app.get('/messages/:conversationId', (req, res) => {
 
   const conversationMessages = messages.get(conversationId) || [];
   res.json({ messages: conversationMessages });
+});
+
+// Group messages endpoint
+app.get('/group-messages/:groupId', (req, res) => {
+  const { groupId } = req.params;
+  const { sender, signature } = req.query;
+
+  // Accept encryption signature as proof of wallet ownership
+  const encryptionMessage = 'Sign this message to derive your encryption keys for Mukon Messenger';
+  if (!verifySignature(sender, encryptionMessage, signature)) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  const msgs = groupMessages.get(groupId) || [];
+  res.json({ messages: msgs });
 });
 
 // WebSocket connection
@@ -273,6 +291,177 @@ io.on('connection', (socket) => {
     socket.to(conversationId).emit('user_typing', {
       publicKey: socket.publicKey
     });
+  });
+
+  // ========== GROUP EVENT HANDLERS ==========
+
+  socket.on('join_group', ({ groupId, memberPubkey }) => {
+    socket.join(`group_${groupId}`);
+
+    if (!groupRooms.has(groupId)) {
+      groupRooms.set(groupId, new Set());
+    }
+    groupRooms.get(groupId).add(socket.id);
+
+    const room = io.sockets.adapter.rooms.get(`group_${groupId}`);
+    const roomSize = room ? room.size : 0;
+    console.log(`${memberPubkey || socket.publicKey || socket.id} joined group: ${groupId.slice(0, 8)}... (now ${roomSize} clients in room)`);
+
+    // Broadcast member joined event
+    if (memberPubkey) {
+      io.to(`group_${groupId}`).emit('group_member_joined', { groupId, memberPubkey });
+    }
+  });
+
+  socket.on('leave_group_room', ({ groupId }) => {
+    socket.leave(`group_${groupId}`);
+
+    if (groupRooms.has(groupId)) {
+      groupRooms.get(groupId).delete(socket.id);
+    }
+
+    console.log(`${socket.publicKey} left group room: ${groupId.slice(0, 8)}...`);
+  });
+
+  socket.on('leave_group', ({ groupId, memberPubkey }) => {
+    socket.leave(`group_${groupId}`);
+
+    if (groupRooms.has(groupId)) {
+      groupRooms.get(groupId).delete(socket.id);
+    }
+
+    console.log(`${memberPubkey} left group: ${groupId.slice(0, 8)}...`);
+
+    // Broadcast member left event
+    io.to(`group_${groupId}`).emit('group_member_left', { groupId, memberPubkey });
+  });
+
+  socket.on('kick_member', ({ groupId, memberPubkey }) => {
+    console.log(`${memberPubkey} kicked from group: ${groupId.slice(0, 8)}...`);
+
+    // Broadcast member kicked event
+    io.to(`group_${groupId}`).emit('group_member_kicked', { groupId, memberPubkey });
+  });
+
+  socket.on('send_group_message', ({ groupId, encrypted, nonce, sender, timestamp }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    const messageData = {
+      id: Date.now().toString() + Math.random(),
+      groupId,
+      sender: sender || socket.publicKey,
+      encrypted,
+      nonce,
+      timestamp: timestamp || Date.now(),
+    };
+
+    // Store message
+    if (!groupMessages.has(groupId)) {
+      groupMessages.set(groupId, []);
+    }
+    groupMessages.get(groupId).push(messageData);
+
+    // Broadcast to group
+    const room = io.sockets.adapter.rooms.get(`group_${groupId}`);
+    const roomSize = room ? room.size : 0;
+    console.log(`📨 Group message sent to ${groupId.slice(0, 8)}... (${roomSize} clients)`);
+    io.to(`group_${groupId}`).emit('group_message', messageData);
+  });
+
+  socket.on('share_group_key', ({ groupId, recipientPubkey, encryptedKey, nonce }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    console.log(`🔑 Sharing group key for ${groupId.slice(0, 8)}... to ${recipientPubkey.slice(0, 8)}...`);
+
+    // Find recipient's socket
+    const recipientSocketId = onlineUsers.get(recipientPubkey);
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('group_key_shared', {
+        groupId,
+        senderPubkey: socket.publicKey,
+        encryptedKey,
+        nonce,
+      });
+      console.log('✅ Group key shared via socket');
+    } else {
+      console.log('⚠️  Recipient not online, will share key when they join');
+      // TODO: Store pending key shares for offline users
+    }
+  });
+
+  socket.on('add_group_reaction', ({ groupId, messageId, emoji, userId }) => {
+    console.log(`📨 add_group_reaction received:`, { groupId: groupId.slice(0, 8) + '...', messageId, emoji });
+
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    const msgs = groupMessages.get(groupId) || [];
+    const message = msgs.find(m => m.id === messageId);
+
+    if (message) {
+      if (!message.reactions) {
+        message.reactions = {};
+      }
+
+      // Toggle logic (same as DMs)
+      const alreadyReacted = message.reactions[emoji]?.includes(userId);
+
+      if (alreadyReacted) {
+        const index = message.reactions[emoji].indexOf(userId);
+        message.reactions[emoji].splice(index, 1);
+        if (message.reactions[emoji].length === 0) {
+          delete message.reactions[emoji];
+        }
+      } else {
+        // Remove from other reactions
+        for (const [existingEmoji, users] of Object.entries(message.reactions)) {
+          const index = users.indexOf(userId);
+          if (index > -1) {
+            users.splice(index, 1);
+            if (users.length === 0) {
+              delete message.reactions[existingEmoji];
+            }
+          }
+        }
+
+        // Add new reaction
+        if (!message.reactions[emoji]) {
+          message.reactions[emoji] = [];
+        }
+        message.reactions[emoji].push(userId);
+      }
+
+      // Broadcast
+      io.to(`group_${groupId}`).emit('group_reaction_updated', {
+        groupId,
+        messageId,
+        reactions: message.reactions,
+      });
+    }
+  });
+
+  socket.on('delete_group_message', ({ groupId, messageId, deleteForBoth }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    if (deleteForBoth) {
+      const msgs = groupMessages.get(groupId) || [];
+      const filtered = msgs.filter(m => m.id !== messageId);
+      groupMessages.set(groupId, filtered);
+
+      io.to(`group_${groupId}`).emit('group_message_deleted', { groupId, messageId });
+      console.log(`Message ${messageId} deleted for everyone in group ${groupId.slice(0, 8)}...`);
+    }
   });
 
   socket.on('disconnect', () => {

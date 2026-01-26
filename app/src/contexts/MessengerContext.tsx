@@ -7,15 +7,30 @@ import bs58 from 'bs58';
 import {
   getUserProfilePDA,
   getWalletDescriptorPDA,
+  getGroupPDA,
+  getGroupInvitePDA,
   createRegisterInstruction,
   createUpdateProfileInstruction,
+  createCloseProfileInstruction,
   createInviteInstruction,
   createAcceptInvitationInstruction,
   createRejectInvitationInstruction,
   createBlockInstruction,
   createUnblockInstruction,
+  createCreateGroupInstruction,
+  createUpdateGroupInstruction,
+  createInviteToGroupInstruction,
+  createAcceptGroupInviteInstruction,
+  createRejectGroupInviteInstruction,
+  createLeaveGroupInstruction,
+  createKickMemberInstruction,
   buildTransaction,
   deserializeWalletDescriptor,
+  deserializeGroup,
+  deserializeGroupInvite,
+  type Group,
+  type GroupInvite,
+  type TokenGate,
 } from '../utils/transactions';
 import { deriveEncryptionKeypair, getChatHash } from '../utils/encryption';
 import type { WalletContextType } from './WalletContext';
@@ -47,8 +62,10 @@ interface MessengerContextType {
   unreadCounts: Map<string, number>;
   loading: boolean;
   encryptionReady: boolean;
-  register: (displayName: string) => Promise<string | null>;
-  updateProfile: (displayName: string, avatarUrl?: string) => Promise<string>;
+  // DM methods
+  register: (displayName: string, avatarData?: string) => Promise<string | null>;
+  updateProfile: (displayName: string, avatarType?: 'Emoji' | 'Nft', avatarData?: string) => Promise<string>;
+  closeProfile: () => Promise<string>;
   invite: (inviteePubkey: PublicKey) => Promise<string>;
   acceptInvitation: (inviterPubkey: PublicKey) => Promise<string>;
   rejectInvitation: (inviterPubkey: PublicKey) => Promise<string>;
@@ -63,6 +80,23 @@ interface MessengerContextType {
   loadConversationMessages: (conversationId: string) => Promise<void>;
   loadContacts: () => Promise<void>;
   loadProfile: () => Promise<void>;
+  // Group methods
+  groups: Group[];
+  groupInvites: GroupInvite[];
+  groupMessages: Map<string, any[]>;
+  createGroup: (name: string, tokenGate?: TokenGate) => Promise<{ groupId: Uint8Array; txSignature: string }>;
+  updateGroup: (groupId: Uint8Array, name?: string, tokenGate?: TokenGate) => Promise<string>;
+  inviteToGroup: (groupId: Uint8Array, inviteePubkey: PublicKey) => Promise<string>;
+  acceptGroupInvite: (groupId: Uint8Array, userTokenAccount?: PublicKey) => Promise<string>;
+  rejectGroupInvite: (groupId: Uint8Array) => Promise<string>;
+  leaveGroup: (groupId: Uint8Array) => Promise<string>;
+  kickMember: (groupId: Uint8Array, memberPubkey: PublicKey) => Promise<string>;
+  sendGroupMessage: (groupId: string, content: string) => Promise<void>;
+  loadGroups: () => Promise<void>;
+  loadGroupInvites: () => Promise<void>;
+  loadGroupMessages: (groupId: string) => Promise<void>;
+  joinGroupRoom: (groupId: string) => void;
+  leaveGroupRoom: (groupId: string) => void;
 }
 
 const MessengerContext = createContext<MessengerContextType | null>(null);
@@ -90,6 +124,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   const [encryptionReady, setEncryptionReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const derivingKeys = useRef(false);
+  // Group state
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupInvites, setGroupInvites] = useState<GroupInvite[]>([]);
+  const [groupMessages, setGroupMessages] = useState<Map<string, any[]>>(new Map());
+  const [groupKeys, setGroupKeys] = useState<Map<string, Uint8Array>>(new Map()); // groupId -> symmetric key
+  const [activeGroupRoom, setActiveGroupRoom] = useState<string | null>(null);
 
   const connection = useMemo(
     () =>
@@ -261,6 +301,72 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       });
     });
 
+    // Group event handlers
+    newSocket.on('group_message', (message: any) => {
+      console.log('📨 Received group message:', message);
+      if (message.groupId) {
+        setGroupMessages((prev) => {
+          const updated = new Map(prev);
+          const groupMsgs = updated.get(message.groupId) || [];
+
+          // Check for duplicates
+          const exists = groupMsgs.some(m => m.id === message.id);
+          if (!exists) {
+            updated.set(message.groupId, [...groupMsgs, message]);
+          }
+
+          return updated;
+        });
+      }
+    });
+
+    newSocket.on('group_member_joined', ({ groupId, memberPubkey }) => {
+      console.log('👥 Member joined group:', groupId, memberPubkey);
+      // Reload groups to update member list
+      // We'll trigger this in the individual screens that need it
+    });
+
+    newSocket.on('group_member_left', ({ groupId, memberPubkey }) => {
+      console.log('👋 Member left group:', groupId, memberPubkey);
+    });
+
+    newSocket.on('group_member_kicked', ({ groupId, memberPubkey }) => {
+      console.log('🚫 Member kicked from group:', groupId, memberPubkey);
+    });
+
+    newSocket.on('group_key_shared', ({ groupId, senderPubkey, encryptedKey, nonce }) => {
+      console.log('🔑 Received group key share from:', senderPubkey);
+
+      // Decrypt group key with our encryption keys
+      if (encryptionKeys) {
+        try {
+          const sender = contacts.find(c => c.publicKey.toBase58() === senderPubkey);
+          if (sender?.encryptionPublicKey) {
+            const encryptedBytes = Buffer.from(encryptedKey, 'base64');
+            const nonceBytes = Buffer.from(nonce, 'base64');
+
+            const decryptedKey = nacl.box.open(
+              encryptedBytes,
+              nonceBytes,
+              sender.encryptionPublicKey,
+              encryptionKeys.secretKey
+            );
+
+            if (decryptedKey) {
+              setGroupKeys(prev => {
+                const updated = new Map(prev);
+                updated.set(groupId, decryptedKey);
+                return updated;
+              });
+              console.log('✅ Group key decrypted and stored');
+            }
+          }
+        } catch (error) {
+          console.error('❌ Failed to decrypt group key:', error);
+        }
+      }
+    });
+
     setSocket(newSocket);
 
     return () => {
@@ -269,7 +375,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   }, [wallet?.publicKey]);
 
   // Register function
-  const register = async (displayName: string) => {
+  const register = async (displayName: string, avatarData: string = '') => {
     if (!wallet?.publicKey || !wallet.signTransaction || !wallet.signMessage) throw new Error('Wallet not connected');
 
     setLoading(true);
@@ -291,6 +397,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       const instruction = createRegisterInstruction(
         wallet.publicKey,
         displayName,
+        avatarData,
         encryptionKeys.publicKey
       );
 
@@ -322,7 +429,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   };
 
   // Other functions (updateProfile, invite, etc.)
-  const updateProfile = async (displayName: string, avatarUrl?: string) => {
+  const updateProfile = async (displayName: string, avatarType?: 'Emoji' | 'Nft', avatarData?: string) => {
     if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
 
     setLoading(true);
@@ -330,8 +437,9 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       const instruction = createUpdateProfileInstruction(
         wallet.publicKey,
         displayName,
-        avatarUrl || '',
-        encryptionKeys ? Array.from(encryptionKeys.publicKey) : undefined
+        avatarType || null,
+        avatarData || null,
+        encryptionKeys ? Array.from(encryptionKeys.publicKey) : null
       );
       const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
       const signedTransaction = await wallet.signTransaction(transaction);
@@ -343,6 +451,33 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       return txSignature;
     } catch (error) {
       console.error('Failed to update profile:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeProfile = async () => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createCloseProfileInstruction(wallet.publicKey);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      // Clear local state
+      setProfile(null);
+      setContacts([]);
+      setMessages(new Map());
+      setEncryptionReady(false);
+
+      console.log('✅ Profile closed, account rent returned');
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to close profile:', error);
       throw error;
     } finally {
       setLoading(false);
@@ -796,6 +931,385 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     }
   }, [wallet?.publicKey, encryptionKeys]);
 
+  // ========== GROUP METHODS ==========
+
+  const createGroup = async (name: string, tokenGate?: TokenGate) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+    if (!encryptionKeys) throw new Error('Encryption keys not available');
+
+    setLoading(true);
+    try {
+      // Generate random group ID
+      const groupId = nacl.randomBytes(32);
+
+      // Generate random symmetric key for group
+      const groupSecret = nacl.randomBytes(nacl.secretbox.keyLength);
+
+      // Store group key locally
+      const groupIdHex = Buffer.from(groupId).toString('hex');
+      setGroupKeys(prev => {
+        const updated = new Map(prev);
+        updated.set(groupIdHex, groupSecret);
+        return updated;
+      });
+
+      const instruction = createCreateGroupInstruction(
+        wallet.publicKey,
+        groupId,
+        name,
+        encryptionKeys.publicKey, // For key distribution
+        tokenGate || null
+      );
+
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      await loadGroups();
+
+      console.log('✅ Group created:', groupIdHex);
+      return { groupId, txSignature };
+    } catch (error) {
+      console.error('Failed to create group:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateGroup = async (groupId: Uint8Array, name?: string, tokenGate?: TokenGate) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createUpdateGroupInstruction(
+        wallet.publicKey,
+        groupId,
+        name || null,
+        tokenGate || null
+      );
+
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      await loadGroups();
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to update group:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inviteToGroup = async (groupId: Uint8Array, inviteePubkey: PublicKey) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+    if (!encryptionKeys) throw new Error('Encryption keys not available');
+
+    setLoading(true);
+    try {
+      const instruction = createInviteToGroupInstruction(wallet.publicKey, groupId, inviteePubkey);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      // Share group key with invitee via Socket.IO
+      const groupIdHex = Buffer.from(groupId).toString('hex');
+      const groupSecret = groupKeys.get(groupIdHex);
+
+      if (groupSecret && socket) {
+        const inviteeContact = contacts.find(c => c.publicKey.equals(inviteePubkey));
+        if (inviteeContact?.encryptionPublicKey) {
+          // Encrypt group key with invitee's public key
+          const nonce = nacl.randomBytes(nacl.box.nonceLength);
+          const encryptedKey = nacl.box(
+            groupSecret,
+            nonce,
+            inviteeContact.encryptionPublicKey,
+            encryptionKeys.secretKey
+          );
+
+          socket.emit('share_group_key', {
+            groupId: groupIdHex,
+            recipientPubkey: inviteePubkey.toBase58(),
+            encryptedKey: Buffer.from(encryptedKey).toString('base64'),
+            nonce: Buffer.from(nonce).toString('base64'),
+          });
+
+          console.log('🔑 Shared group key with invitee via Socket.IO');
+        }
+      }
+
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to invite to group:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const acceptGroupInvite = async (groupId: Uint8Array, userTokenAccount?: PublicKey) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createAcceptGroupInviteInstruction(
+        wallet.publicKey,
+        groupId,
+        userTokenAccount || null
+      );
+
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      await loadGroups();
+      await loadGroupInvites();
+
+      // Notify group via socket
+      if (socket) {
+        const groupIdHex = Buffer.from(groupId).toString('hex');
+        socket.emit('join_group', {
+          groupId: groupIdHex,
+          memberPubkey: wallet.publicKey.toBase58(),
+        });
+      }
+
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to accept group invite:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rejectGroupInvite = async (groupId: Uint8Array) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createRejectGroupInviteInstruction(wallet.publicKey, groupId);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      await loadGroupInvites();
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to reject group invite:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const leaveGroup = async (groupId: Uint8Array) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createLeaveGroupInstruction(wallet.publicKey, groupId);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      // Remove group key from local storage
+      const groupIdHex = Buffer.from(groupId).toString('hex');
+      setGroupKeys(prev => {
+        const updated = new Map(prev);
+        updated.delete(groupIdHex);
+        return updated;
+      });
+
+      // Notify group via socket
+      if (socket) {
+        socket.emit('leave_group', {
+          groupId: groupIdHex,
+          memberPubkey: wallet.publicKey.toBase58(),
+        });
+      }
+
+      await loadGroups();
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to leave group:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const kickMember = async (groupId: Uint8Array, memberPubkey: PublicKey) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createKickMemberInstruction(wallet.publicKey, groupId, memberPubkey);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      // Notify group via socket
+      if (socket) {
+        const groupIdHex = Buffer.from(groupId).toString('hex');
+        socket.emit('kick_member', {
+          groupId: groupIdHex,
+          memberPubkey: memberPubkey.toBase58(),
+        });
+      }
+
+      // TODO: For production, implement key rotation here
+      // Generate new group key and share with remaining members
+
+      await loadGroups();
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to kick member:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendGroupMessage = async (groupId: string, content: string) => {
+    if (!wallet?.publicKey || !socket) throw new Error('Not ready');
+    if (!encryptionKeys) throw new Error('Encryption keys not available');
+
+    try {
+      const groupSecret = groupKeys.get(groupId);
+      if (!groupSecret) {
+        throw new Error('Group key not found - cannot encrypt message');
+      }
+
+      console.log('🔒 Encrypting group message with NaCl secretbox...');
+
+      const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+      const messageBytes = new TextEncoder().encode(content);
+
+      const encrypted = nacl.secretbox(messageBytes, nonce, groupSecret);
+
+      const timestamp = Date.now();
+      const encryptedBase64 = Buffer.from(encrypted).toString('base64');
+      const nonceBase64 = Buffer.from(nonce).toString('base64');
+
+      socket.emit('send_group_message', {
+        groupId,
+        encrypted: encryptedBase64,
+        nonce: nonceBase64,
+        sender: wallet.publicKey.toBase58(),
+        timestamp,
+      });
+
+      console.log('✅ Encrypted group message sent via socket');
+
+      // Optimistic update
+      setGroupMessages(prev => {
+        const updated = new Map(prev);
+        const msgs = updated.get(groupId) || [];
+        updated.set(groupId, [
+          ...msgs,
+          {
+            id: `temp-${timestamp}`,
+            groupId,
+            sender: wallet.publicKey!.toBase58(),
+            content,
+            encrypted: encryptedBase64,
+            nonce: nonceBase64,
+            timestamp,
+          },
+        ]);
+        return updated;
+      });
+    } catch (error) {
+      console.error('Failed to send group message:', error);
+      throw error;
+    }
+  };
+
+  const loadGroups = async () => {
+    if (!wallet?.publicKey) return;
+
+    try {
+      // Query all groups where user is a member
+      // For MVP, we'll need to fetch all user's group PDAs or use a RPC getProgramAccounts call
+      // For now, placeholder - will implement when we have the backend index
+      console.log('TODO: Implement loadGroups() - query user groups from program');
+      setGroups([]);
+    } catch (error) {
+      console.error('Failed to load groups:', error);
+    }
+  };
+
+  const loadGroupInvites = async () => {
+    if (!wallet?.publicKey) return;
+
+    try {
+      // Query all group invites for this user
+      // For MVP, we'll need to fetch all group invite PDAs for this user
+      console.log('TODO: Implement loadGroupInvites() - query user group invites');
+      setGroupInvites([]);
+    } catch (error) {
+      console.error('Failed to load group invites:', error);
+    }
+  };
+
+  const loadGroupMessages = async (groupId: string) => {
+    if (!wallet?.publicKey) return;
+
+    try {
+      const encryptionSig = (window as any).__mukonEncryptionSignature;
+      if (!encryptionSig) {
+        console.error('No encryption signature available');
+        return;
+      }
+
+      const signatureB58 = bs58.encode(encryptionSig);
+      const url = `${BACKEND_URL}/group-messages/${groupId}?sender=${wallet.publicKey.toBase58()}&signature=${encodeURIComponent(signatureB58)}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Failed to load group messages: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log(`📜 Loaded ${data.messages.length} group messages from backend`);
+
+      setGroupMessages(prev => {
+        const updated = new Map(prev);
+        updated.set(groupId, data.messages);
+        return updated;
+      });
+    } catch (error) {
+      console.error('Failed to load group messages:', error);
+    }
+  };
+
+  const joinGroupRoom = (groupId: string) => {
+    if (socket) {
+      socket.emit('join_group', { groupId });
+      setActiveGroupRoom(groupId);
+      console.log('Joining group room:', groupId);
+    }
+  };
+
+  const leaveGroupRoom = (groupId: string) => {
+    if (socket) {
+      socket.emit('leave_group_room', { groupId });
+      setActiveGroupRoom(null);
+      console.log('Leaving group room:', groupId);
+    }
+  };
+
   const value: MessengerContextType = {
     connection,
     socket,
@@ -807,6 +1321,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     encryptionReady,
     register,
     updateProfile,
+    closeProfile,
     invite,
     acceptInvitation,
     rejectInvitation,
@@ -821,6 +1336,23 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     loadConversationMessages,
     loadContacts,
     loadProfile,
+    // Group methods
+    groups,
+    groupInvites,
+    groupMessages,
+    createGroup,
+    updateGroup,
+    inviteToGroup,
+    acceptGroupInvite,
+    rejectGroupInvite,
+    leaveGroup,
+    kickMember,
+    sendGroupMessage,
+    loadGroups,
+    loadGroupInvites,
+    loadGroupMessages,
+    joinGroupRoom,
+    leaveGroupRoom,
   };
 
   return (

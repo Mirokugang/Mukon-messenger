@@ -13,6 +13,11 @@ import ContactsScreen from './src/screens/ContactsScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import AddContactScreen from './src/screens/AddContactScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import CreateGroupScreen from './src/screens/CreateGroupScreen';
+import GroupChatScreen from './src/screens/GroupChatScreen';
+import GroupInfoScreen from './src/screens/GroupInfoScreen';
+import InviteMemberScreen from './src/screens/InviteMemberScreen';
 import CustomDrawer from './src/components/CustomDrawer';
 
 const Stack = createStackNavigator();
@@ -98,6 +103,31 @@ function AppNavigator() {
             name="Profile"
             component={ProfileScreen}
             options={{ title: 'Profile' }}
+          />
+          <Stack.Screen
+            name="Settings"
+            component={SettingsScreen}
+            options={{ title: 'Settings' }}
+          />
+          <Stack.Screen
+            name="CreateGroup"
+            component={CreateGroupScreen}
+            options={{ title: 'Create Group' }}
+          />
+          <Stack.Screen
+            name="GroupChat"
+            component={GroupChatScreen}
+            options={{ headerBackTitleVisible: false }}
+          />
+          <Stack.Screen
+            name="GroupInfo"
+            component={GroupInfoScreen}
+            options={{ title: 'Group Info' }}
+          />
+          <Stack.Screen
+            name="InviteMember"
+            component={InviteMemberScreen}
+            options={{ title: 'Invite Members' }}
           />
         </Stack.Navigator>
       </NavigationContainer>

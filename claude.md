@@ -14,9 +14,144 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 - User needs to see device logs directly, which are not visible to Claude
 - All testing/debugging should be done by the user running their own dev servers and builds
 
-## Current Status (as of 2026-01-24 Evening)
+---
 
-### ✅ MVP COMPLETE - Full-Featured E2E Encrypted Messenger!
+## ⚠️ TEMPORARY: Program Redeployment Strategy (Devnet Only)
+
+**For hackathon development**, we use `close_profile` to allow re-registration after breaking program changes:
+
+```rust
+pub fn close_profile(ctx: Context<CloseProfile>) -> Result<()> {
+    // Closes UserProfile account and returns rent
+    // Allows re-registration after schema changes
+    Ok(())
+}
+```
+
+**Usage:**
+```typescript
+await messenger.closeProfile(); // Close old account
+await messenger.register('Name', '🦅'); // Re-register with new schema
+```
+
+**WHY:** During development, account structures change (e.g., added `avatar_type` field). Solana accounts can't be re-initialized, so `close_profile` destroys old accounts for fresh registration. **This is ONLY acceptable on devnet.**
+
+### 🚨 BEFORE MAINNET - Proper Upgrade Strategy Required
+
+**Current Problem:**
+- No `version` field in accounts
+- No migration logic
+- Breaking changes force users to "close and re-register" (unacceptable for mainnet)
+
+**Required for Production:**
+
+1. **Add Version Field** (breaking change - do before mainnet):
+```rust
+#[account]
+pub struct UserProfile {
+    pub version: u8,  // ← Add this!
+    pub owner: Pubkey,
+    pub display_name: String,
+    pub avatar_type: AvatarType,
+    pub avatar_data: String,
+    pub encryption_public_key: [u8; 32],
+}
+```
+
+2. **Multi-Version Client Deserializer:**
+```typescript
+function deserializeUserProfile(data: Buffer): UserProfile {
+    const version = data.readUInt8(8);
+    if (version === 1) return deserializeV1(data);
+    if (version === 2) return deserializeV2(data);
+    throw new Error('Unsupported version');
+}
+```
+
+3. **Lazy Migration (Auto-Upgrade on Write):**
+```rust
+pub fn update_profile(ctx: Context<UpdateProfile>, ...) -> Result<()> {
+    let profile = &mut ctx.accounts.user_profile;
+
+    if profile.version == 1 {
+        migrate_v1_to_v2(profile)?;
+    }
+
+    profile.display_name = new_name;
+    Ok(())
+}
+```
+
+**Mainnet Checklist:**
+- [ ] Add `version: u8` to all account structs
+- [ ] Implement multi-version deserializers (client)
+- [ ] Add `migrate_profile` instruction with lazy upgrade
+- [ ] Test migration path on devnet
+- [ ] Remove/restrict `close_profile` (or make admin-only)
+- [ ] Never break existing user accounts
+
+**References:**
+- Solana account versioning: https://book.anchor-lang.com/anchor_references/account_types.html
+- Metaplex metadata versioning (good example): https://github.com/metaplex-foundation/metaplex-program-library
+
+---
+
+## Program Deployment Workflow
+
+After making changes to the Solana program, follow these steps:
+
+### 1. Build and Deploy
+```bash
+# From project root (/Users/ash/Mukon-messenger)
+anchor build
+anchor deploy --provider.cluster devnet
+```
+
+### 2. Extract Discriminators
+After deployment, run the automatic discriminator extraction script:
+
+```bash
+# From project root
+node scripts/update-discriminators.js
+```
+
+This script:
+- Reads the IDL from `target/idl/mukon_messenger.json`
+- Extracts all 8-byte instruction discriminators
+- Automatically updates `app/src/utils/transactions.ts`
+- Shows you what changed
+
+**Manual Alternative** (if script fails):
+```bash
+# Parse IDL to see discriminators
+anchor idl parse -f target/idl/mukon_messenger.json
+
+# Then manually copy the discriminator bytes into transactions.ts DISCRIMINATORS object
+```
+
+### 3. Rebuild Client
+```bash
+cd app
+npm run build  # Regular build
+# or npm run build:clean if needed
+```
+
+### 4. Test on Device
+```bash
+adb install -r app-debug.apk
+```
+
+**What are discriminators?**
+- 8-byte instruction identifiers (first 8 bytes of `sha256("global:instruction_name")`)
+- Tell the Solana program which instruction to execute
+- Computed by Anchor during `anchor build`
+- Must match between client and program or transactions fail
+
+---
+
+## Current Status (as of 2026-01-26)
+
+### ✅ DM MVP COMPLETE - Now Implementing Group Chat!
 
 **What's Deployed:**
 - NEW Solana program on devnet: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
@@ -114,13 +249,14 @@ Build a private, wallet-to-wallet encrypted messenger for the Solana Privacy Hac
 9. ✅ ~~Add reply to message~~ - COMPLETE!
 10. ✅ ~~Fix avatar display bugs~~ - COMPLETE!
 11. ✅ ~~Add reaction toggle behavior~~ - COMPLETE!
-12. 🔜 **GROUP CHAT ARCHITECTURE** - Design group chat system before Arcium
-13. 🔜 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty)
-14. Test domain resolution on mainnet (.sol/.skr)
-15. Add wallet connection persistence (AsyncStorage)
-16. Add backend message persistence (SQLite or Redis)
-17. Polish UI/UX (loading states, error messages)
-18. Deploy backend to Fly.io for production
+12. ✅ ~~GROUP CHAT ARCHITECTURE~~ - Design complete (see section below)
+13. 🔄 **GROUP CHAT IMPLEMENTATION** - Currently implementing (Jan 26)
+14. 🔜 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty)
+15. Test domain resolution on mainnet (.sol/.skr)
+16. Add wallet connection persistence (AsyncStorage)
+17. Add backend message persistence (SQLite or Redis)
+18. Polish UI/UX (loading states, error messages)
+19. Deploy backend to Fly.io for production
 
 ## What We're Building
 
@@ -882,6 +1018,185 @@ if (alreadyReacted) {
 - **Short vs long press** - Clear UX for quick react vs full menu
 
 **Status:** ✅ Avatar display fixed everywhere! ✅ Reaction system polished! ✅ Ready for group chat architecture!
+
+## 🚀 GROUP CHAT IMPLEMENTATION (Jan 26, 2026 - CURRENT FOCUS)
+
+### Architecture Decisions Made
+
+**Core Settings:**
+- **Group ID:** Pure random 32 bytes (maximum privacy, no traces to creator)
+- **Max Members:** 30 for MVP (can scale to thousands later)
+- **Admin Model:** Creator = only admin for MVP (no multi-admin)
+- **Visibility:** All group members can see each other's wallet addresses (encrypted from outsiders via Arcium)
+- **Key Rotation:** Only on kicks (not on voluntary leaves) - security debt for MVP
+- **Re-invites:** Users can be re-invited after rejecting (same as DM behavior)
+
+**Token Gating:**
+- Simple fungible token balance check on accept
+- User passes their token account, program verifies `amount >= min_balance`
+- NFT collection gating is post-MVP
+
+**Avatar System Update:**
+- Added `AvatarType` enum: `Emoji` (default) or `NFT`
+- `avatar_data` field stores either emoji string or NFT mint address
+- Client verifies NFT ownership before displaying
+
+### New Solana Program Instructions
+
+```
+ON-CHAIN (7 new instructions):
+├── create_group(group_id, name, encryption_pubkey, token_gate?)
+├── update_group(group_id, name?, token_gate?)
+├── invite_to_group(group_id, invitee)
+├── accept_group_invite(group_id) — checks token gate
+├── reject_group_invite(group_id)
+├── leave_group(group_id)
+└── kick_member(group_id, member) — creator only
+```
+
+### New Account Structures
+
+```rust
+#[account]
+pub struct Group {
+    pub group_id: [u8; 32],           // Random, client-generated
+    pub creator: Pubkey,               // Can never be removed, only admin for MVP
+    pub name: String,                  // Max 64 chars
+    pub created_at: i64,
+    pub members: Vec<Pubkey>,          // Max 30 for MVP
+    pub encryption_pubkey: [u8; 32],   // For group key exchange
+    pub token_gate: Option<TokenGate>, // Optional balance requirement
+}
+
+#[account]
+pub struct GroupInvite {
+    pub group_id: [u8; 32],
+    pub inviter: Pubkey,
+    pub invitee: Pubkey,
+    pub status: GroupInviteStatus,     // Pending, Accepted, Rejected
+    pub created_at: i64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct TokenGate {
+    pub token_mint: Pubkey,
+    pub min_balance: u64,
+}
+```
+
+### Group Encryption Model (Off-Chain)
+
+Messages are NOT stored on-chain. We use shared secret encryption:
+
+```
+1. CREATE GROUP
+   - Creator generates random 32-byte group_secret
+   - Stores locally (encrypted with their wallet keys)
+
+2. INVITE MEMBER
+   - Admin encrypts group_secret with invitee's encryption_public_key (NaCl box)
+   - Sends encrypted key via backend Socket.IO event
+   - Invitee decrypts and stores locally
+
+3. SEND MESSAGE
+   - Sender encrypts message with group_secret (NaCl secretbox)
+   - Backend broadcasts to group room
+   - All members decrypt with same group_secret
+
+4. KICK MEMBER (Post-MVP: key rotation)
+   - Generate new group_secret
+   - Distribute to remaining members
+   - Old messages still readable (had old key)
+```
+
+### Backend Socket.IO Events (To Implement)
+
+```typescript
+// Client → Server
+'join_group_room': { groupId: string }
+'leave_group_room': { groupId: string }
+'group_message': { groupId: string, encryptedContent: string, nonce: string }
+'group_key_share': { groupId: string, recipientPubkey: string, encryptedKey: string, nonce: string }
+
+// Server → Client
+'group_message': { groupId: string, senderPubkey: string, encryptedContent: string, nonce: string, timestamp: number }
+'group_member_joined': { groupId: string, memberPubkey: string }
+'group_member_left': { groupId: string, memberPubkey: string }
+'group_member_kicked': { groupId: string, memberPubkey: string }
+'group_key_shared': { groupId: string, senderPubkey: string, encryptedKey: string, nonce: string }
+```
+
+### ⚠️ NON-NEGOTIABLE: Arcium Encryption
+
+Arcium encryption is NOT optional. Both DMs and Groups ship with encrypted membership lists for hackathon submission.
+
+```
+ARCIUM ENCRYPTS:
+├── DMs: WalletDescriptor.peers[]
+├── Groups: Group.members[]
+└── Invites: GroupInvite.invitee
+
+PATTERN:
+- Same circuits work for both (is_accepted_contact → is_group_member)
+- Members can see each other (decrypt with group key)
+- Outsiders/blockchain observers see encrypted blobs only
+```
+
+### Implementation Timeline
+
+| Day | Focus |
+|-----|-------|
+| 1 | Solana program: apply group code with fixes, deploy to devnet |
+| 2 | Client: transaction builders, MessengerContext group methods |
+| 3 | Backend: Socket.IO group events + UI: GroupsScreen, CreateGroupScreen |
+| 4 | UI: GroupChatScreen, GroupInfoScreen + Arcium encrypted circuits |
+| 5 | Arcium integration testing, full E2E testing on devnet |
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `programs/mukon-messenger/src/lib.rs` | Replace with group code + security fix |
+| `programs/mukon-messenger/Cargo.toml` | Add anchor-spl dependency |
+| `app/src/utils/transactions.ts` | Update register, add 7 group builders |
+| `app/src/contexts/MessengerContext.tsx` | Add group state/methods/socket handlers |
+| `backend/src/index.js` | Add group message/key handlers |
+| `app/App.tsx` | Add group screens to navigation |
+| `app/src/components/CustomDrawer.tsx` | Add Groups menu item |
+| `tests/mukon-messenger.ts` | Fix register calls, add group tests |
+
+### New Screens to Create
+
+| Screen | Purpose |
+|--------|---------|
+| `GroupsScreen.tsx` | List user's groups |
+| `CreateGroupScreen.tsx` | Create group form |
+| `GroupChatScreen.tsx` | Group chat interface |
+| `GroupInfoScreen.tsx` | Group details, members, settings |
+| `InviteMemberScreen.tsx` | Invite contacts to group |
+
+### Critical Security Fix Needed
+
+**Token account owner verification** in `accept_group_invite`:
+```rust
+// User's code checks mint and amount but NOT owner!
+// Add this check to prevent using someone else's token account:
+require!(
+    token_account.owner == ctx.accounts.payer.key(),
+    ErrorCode::InvalidTokenAccount
+);
+```
+
+### Breaking Change: register() Signature
+
+The new code changes `register()` to include `avatar_data`:
+- **Old:** `register(display_name, encryption_public_key)`
+- **New:** `register(display_name, avatar_data, encryption_public_key)`
+
+**Client updates required:**
+- `app/src/utils/transactions.ts` - `createRegisterInstruction()`
+- `app/src/contexts/MessengerContext.tsx` - `register()` function
+- `tests/mukon-messenger.ts` - All register() calls
 
 ## Testing Guidelines
 

@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token::{Token, TokenAccount};
 use sha2::{Digest, Sha256};
 use arcium_anchor::prelude::*;
 
@@ -16,6 +17,22 @@ pub enum ErrorCode {
     InvalidHash,
     #[msg("Display name too long")]
     DisplayNameTooLong,
+    #[msg("Group name too long")]
+    GroupNameTooLong,
+    #[msg("Group is full")]
+    GroupFull,
+    #[msg("Not a group member")]
+    NotGroupMember,
+    #[msg("Not group admin")]
+    NotGroupAdmin,
+    #[msg("Cannot remove creator")]
+    CannotRemoveCreator,
+    #[msg("Insufficient token balance")]
+    InsufficientTokenBalance,
+    #[msg("Token account required")]
+    TokenAccountRequired,
+    #[msg("Token account does not belong to user")]
+    InvalidTokenAccount,
 }
 
 // Deterministic hash function for chat PDAs
@@ -45,7 +62,7 @@ fn get_chat_hash(a: Pubkey, b: Pubkey) -> [u8; 32] {
 pub mod mukon_messenger {
     use super::*;
 
-    pub fn register(ctx: Context<Register>, display_name: String, encryption_public_key: [u8; 32]) -> Result<()> {
+    pub fn register(ctx: Context<Register>, display_name: String, avatar_data: String, encryption_public_key: [u8; 32]) -> Result<()> {
         let wallet_descriptor = &mut ctx.accounts.wallet_descriptor;
         let user_profile = &mut ctx.accounts.user_profile;
         let payer = &ctx.accounts.payer;
@@ -57,7 +74,8 @@ pub mod mukon_messenger {
 
         user_profile.owner = payer.key();
         user_profile.display_name = display_name.clone();
-        user_profile.avatar_url = String::new();
+        user_profile.avatar_type = AvatarType::Emoji;
+        user_profile.avatar_data = avatar_data;
         user_profile.encryption_public_key = encryption_public_key;
 
         msg!("Register: {:?} with display name: {}", payer.key(), display_name);
@@ -68,7 +86,8 @@ pub mod mukon_messenger {
     pub fn update_profile(
         ctx: Context<UpdateProfile>,
         display_name: Option<String>,
-        avatar_url: Option<String>,
+        avatar_type: Option<AvatarType>,
+        avatar_data: Option<String>,
         encryption_public_key: Option<[u8; 32]>
     ) -> Result<()> {
         let user_profile = &mut ctx.accounts.user_profile;
@@ -78,8 +97,12 @@ pub mod mukon_messenger {
             user_profile.display_name = name;
         }
 
-        if let Some(url) = avatar_url {
-            user_profile.avatar_url = url;
+        if let Some(atype) = avatar_type {
+            user_profile.avatar_type = atype;
+        }
+
+        if let Some(adata) = avatar_data {
+            user_profile.avatar_data = adata;
         }
 
         if let Some(key) = encryption_public_key {
@@ -88,6 +111,13 @@ pub mod mukon_messenger {
 
         msg!("Profile updated: {:?}", ctx.accounts.payer.key());
 
+        Ok(())
+    }
+
+    /// Close profile account and return rent (useful for testing/redeployment)
+    /// WARNING: This is a destructive operation - use with caution!
+    pub fn close_profile(ctx: Context<CloseProfile>) -> Result<()> {
+        msg!("Profile closed: {:?}", ctx.accounts.payer.key());
         Ok(())
     }
 
@@ -318,13 +348,224 @@ pub mod mukon_messenger {
 
         Ok(())
     }
+
+    // ========== GROUP CHAT INSTRUCTIONS ==========
+
+    pub fn create_group(
+        ctx: Context<CreateGroup>,
+        group_id: [u8; 32],
+        name: String,
+        encryption_pubkey: [u8; 32],
+        token_gate: Option<TokenGate>
+    ) -> Result<()> {
+        require!(name.len() <= 64, ErrorCode::GroupNameTooLong);
+
+        let group = &mut ctx.accounts.group;
+        group.group_id = group_id;
+        group.creator = ctx.accounts.payer.key();
+        group.name = name.clone();
+        group.created_at = Clock::get()?.unix_timestamp;
+        group.members = vec![ctx.accounts.payer.key()];
+        group.encryption_pubkey = encryption_pubkey;
+        group.token_gate = token_gate;
+
+        msg!("Group created: id={:?}, name={}, creator={:?}",
+             group_id, name, ctx.accounts.payer.key());
+
+        Ok(())
+    }
+
+    pub fn update_group(
+        ctx: Context<UpdateGroup>,
+        name: Option<String>,
+        token_gate: Option<TokenGate>
+    ) -> Result<()> {
+        let group = &mut ctx.accounts.group;
+
+        // Only creator can update group
+        require!(
+            group.creator == ctx.accounts.payer.key(),
+            ErrorCode::NotGroupAdmin
+        );
+
+        if let Some(new_name) = name {
+            require!(new_name.len() <= 64, ErrorCode::GroupNameTooLong);
+            group.name = new_name;
+        }
+
+        if let Some(new_gate) = token_gate {
+            group.token_gate = Some(new_gate);
+        }
+
+        msg!("Group updated: id={:?}", group.group_id);
+
+        Ok(())
+    }
+
+    pub fn invite_to_group(ctx: Context<InviteToGroup>) -> Result<()> {
+        let group = &ctx.accounts.group;
+
+        // Only creator can invite (admin-only for MVP)
+        require!(
+            group.creator == ctx.accounts.payer.key(),
+            ErrorCode::NotGroupAdmin
+        );
+
+        // Check if group is full
+        require!(group.members.len() < 30, ErrorCode::GroupFull);
+
+        // Check if already a member or invited
+        require!(
+            !group.members.contains(&ctx.accounts.invitee.key()),
+            ErrorCode::AlreadyInvited
+        );
+
+        // Create or update invite
+        let invite = &mut ctx.accounts.group_invite;
+        invite.group_id = group.group_id;
+        invite.inviter = ctx.accounts.payer.key();
+        invite.invitee = ctx.accounts.invitee.key();
+        invite.status = GroupInviteStatus::Pending;
+        invite.created_at = Clock::get()?.unix_timestamp;
+
+        msg!("Group invite: group={:?}, invitee={:?}",
+             group.group_id, ctx.accounts.invitee.key());
+
+        Ok(())
+    }
+
+    pub fn accept_group_invite(ctx: Context<AcceptGroupInvite>) -> Result<()> {
+        let group = &mut ctx.accounts.group;
+        let invite = &mut ctx.accounts.group_invite;
+
+        // Verify invite status
+        require!(
+            invite.status == GroupInviteStatus::Pending,
+            ErrorCode::NotInvited
+        );
+
+        // Verify invitee is the signer
+        require!(
+            invite.invitee == ctx.accounts.payer.key(),
+            ErrorCode::NotInvited
+        );
+
+        // Check token gate if exists
+        if let Some(gate) = &group.token_gate {
+            let token_account = ctx.accounts.user_token_account.as_ref()
+                .ok_or(ErrorCode::TokenAccountRequired)?;
+
+            // SECURITY FIX: Verify token account ownership
+            require!(
+                token_account.owner == ctx.accounts.payer.key(),
+                ErrorCode::InvalidTokenAccount
+            );
+
+            require!(token_account.mint == gate.token_mint, ErrorCode::InsufficientTokenBalance);
+            require!(token_account.amount >= gate.min_balance, ErrorCode::InsufficientTokenBalance);
+        }
+
+        // Check if group is full
+        require!(group.members.len() < 30, ErrorCode::GroupFull);
+
+        // Add to group
+        group.members.push(ctx.accounts.payer.key());
+
+        // Update invite status
+        invite.status = GroupInviteStatus::Accepted;
+
+        msg!("Group invite accepted: group={:?}, member={:?}",
+             group.group_id, ctx.accounts.payer.key());
+
+        Ok(())
+    }
+
+    pub fn reject_group_invite(ctx: Context<RejectGroupInvite>) -> Result<()> {
+        let invite = &mut ctx.accounts.group_invite;
+
+        // Verify invite status
+        require!(
+            invite.status == GroupInviteStatus::Pending,
+            ErrorCode::NotInvited
+        );
+
+        // Verify invitee is the signer
+        require!(
+            invite.invitee == ctx.accounts.payer.key(),
+            ErrorCode::NotInvited
+        );
+
+        // Update invite status
+        invite.status = GroupInviteStatus::Rejected;
+
+        msg!("Group invite rejected: group={:?}, invitee={:?}",
+             invite.group_id, ctx.accounts.payer.key());
+
+        Ok(())
+    }
+
+    pub fn leave_group(ctx: Context<LeaveGroup>) -> Result<()> {
+        let group = &mut ctx.accounts.group;
+
+        // Cannot leave if you're the creator
+        require!(
+            group.creator != ctx.accounts.payer.key(),
+            ErrorCode::CannotRemoveCreator
+        );
+
+        // Verify member is in group
+        require!(
+            group.members.contains(&ctx.accounts.payer.key()),
+            ErrorCode::NotGroupMember
+        );
+
+        // Remove from members
+        group.members.retain(|m| m != &ctx.accounts.payer.key());
+
+        msg!("Left group: group={:?}, member={:?}",
+             group.group_id, ctx.accounts.payer.key());
+
+        Ok(())
+    }
+
+    pub fn kick_member(ctx: Context<KickMember>) -> Result<()> {
+        let group = &mut ctx.accounts.group;
+
+        // Only creator can kick (admin-only for MVP)
+        require!(
+            group.creator == ctx.accounts.payer.key(),
+            ErrorCode::NotGroupAdmin
+        );
+
+        // Cannot kick the creator
+        require!(
+            ctx.accounts.member.key() != group.creator,
+            ErrorCode::CannotRemoveCreator
+        );
+
+        // Verify member is in group
+        require!(
+            group.members.contains(&ctx.accounts.member.key()),
+            ErrorCode::NotGroupMember
+        );
+
+        // Remove from members
+        group.members.retain(|m| m != &ctx.accounts.member.key());
+
+        msg!("Kicked from group: group={:?}, member={:?}",
+             group.group_id, ctx.accounts.member.key());
+
+        Ok(())
+    }
 }
 
-// Account Structures
+// ========== ACCOUNT STRUCTURES ==========
 
 const WALLET_DESCRIPTOR_VERSION: [u8; 1] = [1];
 const USER_PROFILE_VERSION: [u8; 1] = [1];
 const CONVERSATION_VERSION: [u8; 1] = [1];
+const GROUP_VERSION: [u8; 1] = [1];
+const GROUP_INVITE_VERSION: [u8; 1] = [1];
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum PeerState {
@@ -335,10 +576,29 @@ pub enum PeerState {
     Blocked = 4,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+pub enum AvatarType {
+    Emoji = 0,
+    Nft = 1,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+pub enum GroupInviteStatus {
+    Pending = 0,
+    Accepted = 1,
+    Rejected = 2,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct Peer {
     pub wallet: Pubkey,
     pub state: PeerState,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct TokenGate {
+    pub token_mint: Pubkey,
+    pub min_balance: u64,
 }
 
 #[account]
@@ -351,7 +611,8 @@ pub struct WalletDescriptor {
 pub struct UserProfile {
     pub owner: Pubkey,
     pub display_name: String,
-    pub avatar_url: String,
+    pub avatar_type: AvatarType,
+    pub avatar_data: String,
     pub encryption_public_key: [u8; 32],
 }
 
@@ -361,10 +622,30 @@ pub struct Conversation {
     pub created_at: i64,
 }
 
-// Context Structures
+#[account]
+pub struct Group {
+    pub group_id: [u8; 32],
+    pub creator: Pubkey,
+    pub name: String,
+    pub created_at: i64,
+    pub members: Vec<Pubkey>,
+    pub encryption_pubkey: [u8; 32],
+    pub token_gate: Option<TokenGate>,
+}
+
+#[account]
+pub struct GroupInvite {
+    pub group_id: [u8; 32],
+    pub inviter: Pubkey,
+    pub invitee: Pubkey,
+    pub status: GroupInviteStatus,
+    pub created_at: i64,
+}
+
+// ========== CONTEXT STRUCTURES ==========
 
 #[derive(Accounts)]
-#[instruction(display_name: String, encryption_public_key: [u8; 32])]
+#[instruction(display_name: String, avatar_data: String, encryption_public_key: [u8; 32])]
 pub struct Register<'info> {
     #[account(
         init,
@@ -377,7 +658,7 @@ pub struct Register<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 32 + (4 + 32) + (4 + 128) + 32,
+        space = 8 + 32 + (4 + 32) + 1 + (4 + 128) + 32,
         seeds = [b"user_profile", payer.key().as_ref(), USER_PROFILE_VERSION.as_ref()],
         bump
     )]
@@ -393,7 +674,7 @@ pub struct UpdateProfile<'info> {
         mut,
         seeds = [b"user_profile", payer.key().as_ref(), USER_PROFILE_VERSION.as_ref()],
         bump,
-        realloc = 8 + 32 + (4 + 32) + (4 + 128),
+        realloc = 8 + 32 + (4 + 32) + 1 + (4 + 128) + 32,
         realloc::payer = payer,
         realloc::zero = true
     )]
@@ -401,6 +682,19 @@ pub struct UpdateProfile<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseProfile<'info> {
+    #[account(
+        mut,
+        seeds = [b"user_profile", payer.key().as_ref(), USER_PROFILE_VERSION.as_ref()],
+        bump,
+        close = payer  // Close account and return rent to payer
+    )]
+    pub user_profile: Account<'info, UserProfile>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -422,7 +716,7 @@ pub struct Invite<'info> {
     #[account(
         init_if_needed,
         payer = payer,
-        space = 8 + 32 + 4 + 100 * (32 + 1),  // Space for ~100 contacts
+        space = 8 + 32 + 4 + 100 * (32 + 1),
         seeds = [b"wallet_descriptor", invitee.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
         bump
     )]
@@ -516,4 +810,128 @@ pub struct Unblock<'info> {
         bump
     )]
     pub peer_descriptor: Account<'info, WalletDescriptor>,
+}
+
+// ========== GROUP CONTEXT STRUCTURES ==========
+
+#[derive(Accounts)]
+#[instruction(group_id: [u8; 32], name: String, encryption_pubkey: [u8; 32], token_gate: Option<TokenGate>)]
+pub struct CreateGroup<'info> {
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + 32 + 32 + (4 + 64) + 8 + (4 + 30 * 32) + 32 + (1 + 32 + 8),
+        seeds = [b"group", group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump
+    )]
+    pub group: Account<'info, Group>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateGroup<'info> {
+    #[account(
+        mut,
+        seeds = [b"group", group.group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump
+    )]
+    pub group: Account<'info, Group>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct InviteToGroup<'info> {
+    #[account(
+        mut,
+        seeds = [b"group", group.group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump
+    )]
+    pub group: Account<'info, Group>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + 32 + 32 + 32 + 1 + 8,
+        seeds = [b"group_invite", group.group_id.as_ref(), invitee.key().as_ref(), GROUP_INVITE_VERSION.as_ref()],
+        bump
+    )]
+    pub group_invite: Account<'info, GroupInvite>,
+    /// CHECK: invitee is a public key
+    pub invitee: AccountInfo<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptGroupInvite<'info> {
+    #[account(
+        mut,
+        seeds = [b"group", group.group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump,
+        realloc = 8 + 32 + 32 + (4 + 64) + 8 + (4 + (group.members.len() + 1) * 32) + 32 + (1 + 32 + 8),
+        realloc::payer = payer,
+        realloc::zero = false
+    )]
+    pub group: Account<'info, Group>,
+    #[account(
+        mut,
+        seeds = [b"group_invite", group.group_id.as_ref(), payer.key().as_ref(), GROUP_INVITE_VERSION.as_ref()],
+        bump
+    )]
+    pub group_invite: Account<'info, GroupInvite>,
+    pub user_token_account: Option<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Option<Program<'info, Token>>,
+}
+
+#[derive(Accounts)]
+pub struct RejectGroupInvite<'info> {
+    #[account(
+        mut,
+        seeds = [b"group_invite", group_invite.group_id.as_ref(), payer.key().as_ref(), GROUP_INVITE_VERSION.as_ref()],
+        bump
+    )]
+    pub group_invite: Account<'info, GroupInvite>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct LeaveGroup<'info> {
+    #[account(
+        mut,
+        seeds = [b"group", group.group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump,
+        realloc = 8 + 32 + 32 + (4 + 64) + 8 + (4 + (group.members.len().saturating_sub(1)) * 32) + 32 + (1 + 32 + 8),
+        realloc::payer = payer,
+        realloc::zero = false
+    )]
+    pub group: Account<'info, Group>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct KickMember<'info> {
+    #[account(
+        mut,
+        seeds = [b"group", group.group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump,
+        realloc = 8 + 32 + 32 + (4 + 64) + 8 + (4 + (group.members.len().saturating_sub(1)) * 32) + 32 + (1 + 32 + 8),
+        realloc::payer = payer,
+        realloc::zero = false
+    )]
+    pub group: Account<'info, Group>,
+    /// CHECK: member to kick
+    pub member: AccountInfo<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
