@@ -155,7 +155,8 @@ adb install -r app-debug.apk
 
 **What's Deployed:**
 - NEW Solana program on devnet: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
-- Program includes: register (with encryption key), invite, accept, reject, update_profile, **block, unblock**
+- **DM Instructions:** register (with encryption key), invite, accept, reject, update_profile, block, unblock, close_profile
+- **Group Instructions:** create_group, update_group, invite_to_group, accept_group_invite, reject_group_invite, leave_group, kick_member
 - Backend WebSocket server running on 192.168.1.33:3001 (host IP for physical device)
 
 **What's Working:**
@@ -200,11 +201,23 @@ adb install -r app-debug.apk
 - ✅ **Tap to change avatar** - Emoji picker in profile screen
 
 **Contact Management (Jan 24):**
-- ✅ **.sol/.skr domain resolution** - Add contacts by domain name
+- ✅ **.sol/.skr domain resolution** - Add contacts by domain name (needs mainnet testing)
 - ✅ **Contact custom names** - Local storage via AsyncStorage
 - ✅ **Contact name syncing** - useFocusEffect refreshes across screens
 - ✅ **Domain caching** - Faster lookups for resolved domains
 - ✅ **Manual SNS implementation** - React Native compatible (js-sha256)
+- ✅ **Name priority:** Custom name > Domain > On-chain name > Pubkey
+- 🔜 **Future:** Move custom names on-chain for cross-device sync (post-hackathon)
+
+**Group Chat (Jan 26):**
+- ✅ **Create groups** - Up to 30 members, optional token gating
+- ✅ **Group invitations** - Invite contacts to groups, accept/reject flow
+- ✅ **Token gating** - SPL token balance verification for group access
+- ✅ **Group management** - Admin can kick members, members can leave
+- ✅ **Group encryption** - Symmetric encryption with NaCl secretbox
+- ✅ **Unified conversations** - DMs and Groups in single list with filter chips
+- ✅ **Settings screen** - Account management, close_profile for devnet iteration
+- ✅ **Automatic discriminator extraction** - Script updates client after program deployment
 
 **Recent Major Refactor (Jan 20):**
 - Created `MessengerContext` to centralize socket/encryption/state management
@@ -228,14 +241,18 @@ adb install -r app-debug.apk
 4. Send encrypted messages (E2E encrypted, backend only sees blobs)
 5. Both users can decrypt messages using conversation partner's encryption public key
 
-**Known Issues to Fix (Priority Order):**
-1. **Too many wallet verification prompts** - ✅ FIXED with MessengerContext (Jan 20)
-2. **Second wallet decryption problems** - ✅ FIXED with correct recipient determination (Jan 20)
-3. **Socket.IO connection timeout** - ✅ FIXED with transport order matching backend (Jan 20)
-4. **Contact management** - ✅ FIXED with block/unblock + symmetric deletion (Jan 20)
-5. **Message deletion** - ✅ FIXED with Telegram-style delete for self/everyone (Jan 20)
-6. **No wallet connection persistence** - Closing/reopening app requires full reconnect (TODO)
-7. Backend only stores messages in memory - Need SQLite/Redis for persistence (TODO)
+**Known Issues Fixed:**
+1. ✅ **Too many wallet verification prompts** - FIXED with MessengerContext (Jan 20)
+2. ✅ **Second wallet decryption problems** - FIXED with correct recipient determination (Jan 20)
+3. ✅ **Socket.IO connection timeout** - FIXED with transport order matching backend (Jan 20)
+4. ✅ **Contact management** - FIXED with block/unblock + symmetric deletion (Jan 20)
+5. ✅ **Message deletion** - FIXED with Telegram-style delete for self/everyone (Jan 20)
+
+**Remaining Issues (Post-Hackathon):**
+1. **Wallet connection persistence** - Closing/reopening app requires full reconnect
+2. **Backend message persistence** - Currently in-memory only, need SQLite/Redis
+3. **Domain resolution verification** - Code implemented but needs testing on mainnet with real domains
+4. **Group key rotation** - Currently only rotates on kick, should rotate on all member changes (security debt)
 
 **Next Steps:**
 1. ✅ ~~Test messaging between wallets~~ - WORKING!
@@ -250,13 +267,14 @@ adb install -r app-debug.apk
 10. ✅ ~~Fix avatar display bugs~~ - COMPLETE!
 11. ✅ ~~Add reaction toggle behavior~~ - COMPLETE!
 12. ✅ ~~GROUP CHAT ARCHITECTURE~~ - Design complete (see section below)
-13. 🔄 **GROUP CHAT IMPLEMENTATION** - Currently implementing (Jan 26)
-14. 🔜 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty)
-15. Test domain resolution on mainnet (.sol/.skr)
-16. Add wallet connection persistence (AsyncStorage)
-17. Add backend message persistence (SQLite or Redis)
-18. Polish UI/UX (loading states, error messages)
-19. Deploy backend to Fly.io for production
+13. ✅ ~~GROUP CHAT IMPLEMENTATION~~ - All 7 instructions deployed, UI screens built, backend ready (Jan 26)
+14. 🔄 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty) - **CURRENT PRIORITY**
+15. 🔜 Test group chat E2E (create, invite, message, token gating)
+16. 🔜 Test domain resolution on mainnet with real .sol/.skr domains
+17. 🔜 Add wallet connection persistence (AsyncStorage)
+18. 🔜 Add backend message persistence (SQLite or Redis)
+19. 🔜 Polish UI/UX (loading states, error messages)
+20. 🔜 Deploy backend to Fly.io for production
 
 ## What We're Building
 
