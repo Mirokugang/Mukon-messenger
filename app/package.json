@@ -15,8 +15,7 @@
     "build:release:prebuild": "npx expo prebuild --clean && ./build-apk.sh release",
     "deploy": "adb install -r mukon-debug.apk",
     "deploy:release": "adb install -r mukon-release.apk",
-    "dev": "concurrently \"npm run android:dev\" \"npm run start --dev-client\"",
-    "prebuild": "expo prebuild --clean"
+    "dev": "concurrently \"npm run android:dev\" \"npm run start --dev-client\""
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

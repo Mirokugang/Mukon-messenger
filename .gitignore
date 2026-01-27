@@ -12,6 +12,7 @@ node_modules/
 # Expo
 app/.expo/
 app/dist/
+app/ios/
 npm-debug.*
 *.jks
 *.p8
