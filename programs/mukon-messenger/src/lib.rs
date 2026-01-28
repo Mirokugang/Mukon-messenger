@@ -117,6 +117,27 @@ pub mod mukon_messenger {
     /// Close profile account and return rent (useful for testing/redeployment)
     /// WARNING: This is a destructive operation - use with caution!
     pub fn close_profile(ctx: Context<CloseProfile>) -> Result<()> {
+        // Verify the PDA is correct (prevents closing wrong accounts)
+        let (expected_pda, _bump) = Pubkey::find_program_address(
+            &[
+                b"user_profile",
+                ctx.accounts.payer.key().as_ref(),
+                USER_PROFILE_VERSION.as_ref(),
+            ],
+            ctx.program_id,
+        );
+
+        require_keys_eq!(
+            ctx.accounts.user_profile.key(),
+            expected_pda,
+            ErrorCode::InvalidHash
+        );
+
+        // Manually close the account and transfer lamports to payer
+        let user_profile_lamports = ctx.accounts.user_profile.lamports();
+        **ctx.accounts.user_profile.lamports.borrow_mut() = 0;
+        **ctx.accounts.payer.lamports.borrow_mut() += user_profile_lamports;
+
         msg!("Profile closed: {:?}", ctx.accounts.payer.key());
         Ok(())
     }
@@ -686,15 +707,12 @@ pub struct UpdateProfile<'info> {
 
 #[derive(Accounts)]
 pub struct CloseProfile<'info> {
-    #[account(
-        mut,
-        seeds = [b"user_profile", payer.key().as_ref(), USER_PROFILE_VERSION.as_ref()],
-        bump,
-        close = payer  // Close account and return rent to payer
-    )]
-    pub user_profile: Account<'info, UserProfile>,
+    /// CHECK: Old account structure may not deserialize. Client must pass correct PDA.
+    #[account(mut)]
+    pub user_profile: UncheckedAccount<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]

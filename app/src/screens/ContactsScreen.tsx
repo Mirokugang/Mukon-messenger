@@ -577,9 +577,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     flexDirection: 'row',
+    alignItems: 'center',
   },
   chip: {
     marginRight: 8,
+    height: 32,
   },
   chipText: {
     color: theme.colors.textSecondary,
