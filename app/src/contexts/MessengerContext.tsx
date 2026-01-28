@@ -85,6 +85,7 @@ interface MessengerContextType {
   groupInvites: GroupInvite[];
   groupMessages: Map<string, any[]>;
   createGroup: (name: string, tokenGate?: TokenGate) => Promise<{ groupId: Uint8Array; txSignature: string }>;
+  createGroupWithMembers: (name: string, invitees: PublicKey[], tokenGate?: TokenGate) => Promise<{ groupId: Uint8Array; txSignature: string }>;
   updateGroup: (groupId: Uint8Array, name?: string, tokenGate?: TokenGate) => Promise<string>;
   inviteToGroup: (groupId: Uint8Array, inviteePubkey: PublicKey) => Promise<string>;
   acceptGroupInvite: (groupId: Uint8Array, userTokenAccount?: PublicKey) => Promise<string>;
@@ -979,6 +980,62 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     }
   };
 
+  const createGroupWithMembers = async (
+    name: string,
+    invitees: PublicKey[],
+    tokenGate?: TokenGate
+  ) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+    if (!encryptionKeys) throw new Error('Encryption keys not available');
+
+    setLoading(true);
+    try {
+      // Generate random group ID
+      const groupId = nacl.randomBytes(32);
+
+      // Generate random symmetric key for group
+      const groupSecret = nacl.randomBytes(nacl.secretbox.keyLength);
+
+      // Store group key locally
+      const groupIdHex = Buffer.from(groupId).toString('hex');
+      setGroupKeys(prev => {
+        const updated = new Map(prev);
+        updated.set(groupIdHex, groupSecret);
+        return updated;
+      });
+
+      // Build array of instructions: create + all invites
+      const instructions = [
+        createCreateGroupInstruction(
+          wallet.publicKey,
+          groupId,
+          name,
+          encryptionKeys.publicKey,
+          tokenGate || null
+        ),
+        ...invitees.map(invitee =>
+          createInviteToGroupInstruction(wallet.publicKey, groupId, invitee)
+        )
+      ];
+
+      // Single transaction with all instructions
+      const transaction = await buildTransaction(connection, wallet.publicKey, instructions);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      await loadGroups();
+
+      console.log(`✅ Group created with ${invitees.length} invites:`, groupIdHex);
+      return { groupId, txSignature };
+    } catch (error) {
+      console.error('Failed to create group with members:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateGroup = async (groupId: Uint8Array, name?: string, tokenGate?: TokenGate) => {
     if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
 
@@ -1296,8 +1353,45 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         }
       }
 
+      // Query 2: Find groups where user is the creator
+      // Creators are added directly to Group.members but don't have GroupInvite accounts
+      const creatorGroups = await connection.getProgramAccounts(PROGRAM_ID, {
+        filters: [
+          {
+            // Group account size: 8 + 32 + 32 + (4+64) + 8 + (4+30*32) + 32 + (1+32+8)
+            dataSize: 8 + 32 + 32 + (4 + 64) + 8 + (4 + 30 * 32) + 32 + (1 + 32 + 8),
+          },
+          {
+            // Filter for accounts where creator = wallet.publicKey (offset 8 + 32 = 40)
+            memcmp: {
+              offset: 40,
+              bytes: wallet.publicKey.toBase58(),
+            },
+          },
+        ],
+      });
+
+      console.log(`Found ${creatorGroups.length} groups where user is creator`);
+
+      // Merge and dedupe results
+      for (const { account } of creatorGroups) {
+        try {
+          const group = deserializeGroup(account.data);
+          const groupIdHex = Buffer.from(group.groupId).toString('hex');
+
+          // Skip if we've already loaded this group
+          if (!uniqueGroupIds.has(groupIdHex)) {
+            uniqueGroupIds.add(groupIdHex);
+            loadedGroups.push(group);
+            console.log(`✅ Loaded creator group: ${group.name} (${group.members.length} members)`);
+          }
+        } catch (error) {
+          console.error('Failed to deserialize creator group:', error);
+        }
+      }
+
       setGroups(loadedGroups);
-      console.log(`📂 Loaded ${loadedGroups.length} groups`);
+      console.log(`📂 Loaded ${loadedGroups.length} groups total`);
     } catch (error) {
       console.error('Failed to load groups:', error);
       setGroups([]);
@@ -1395,6 +1489,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     groupInvites,
     groupMessages,
     createGroup,
+    createGroupWithMembers,
     updateGroup,
     inviteToGroup,
     acceptGroupInvite,

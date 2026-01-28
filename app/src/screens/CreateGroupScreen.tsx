@@ -1,19 +1,45 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { TextInput, Button, Text, Switch, Portal, Dialog } from 'react-native-paper';
+import { View, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
+import { TextInput, Button, Text, Switch, Portal, Dialog, List, Checkbox, Searchbar } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import { useMessenger } from '../contexts/MessengerContext';
 import { PublicKey } from '@solana/web3.js';
 
 export default function CreateGroupScreen() {
   const navigation = useNavigation();
-  const { createGroup, loading } = useMessenger();
+  const { createGroupWithMembers, contacts, loading } = useMessenger();
 
   const [groupName, setGroupName] = useState('');
   const [tokenGateEnabled, setTokenGateEnabled] = useState(false);
   const [tokenMint, setTokenMint] = useState('');
   const [minBalance, setMinBalance] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
+  const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Filter to only accepted contacts
+  const acceptedContacts = contacts.filter(c => c.state === 'Accepted');
+
+  // Filter by search query
+  const filteredContacts = acceptedContacts.filter(contact => {
+    const pubkey = contact.publicKey.toBase58().toLowerCase();
+    const displayName = contact.displayName?.toLowerCase() || '';
+    const query = searchQuery.toLowerCase();
+
+    return pubkey.includes(query) || displayName.includes(query);
+  });
+
+  const toggleContact = (pubkey: string) => {
+    setSelectedContacts(prev => {
+      const next = new Set(prev);
+      if (next.has(pubkey)) {
+        next.delete(pubkey);
+      } else {
+        next.add(pubkey);
+      }
+      return next;
+    });
+  };
 
   const handleCreateGroup = async () => {
     if (!groupName.trim()) {
@@ -54,8 +80,11 @@ export default function CreateGroupScreen() {
         };
       }
 
-      const { groupId, txSignature } = await createGroup(groupName, tokenGate);
-      console.log('✅ Group created:', Buffer.from(groupId).toString('hex'));
+      // Convert selected contacts to PublicKey array
+      const invitees = Array.from(selectedContacts).map(pubkeyStr => new PublicKey(pubkeyStr));
+
+      const { groupId, txSignature } = await createGroupWithMembers(groupName, invitees, tokenGate);
+      console.log('✅ Group created with', invitees.length, 'invites:', Buffer.from(groupId).toString('hex'));
       console.log('Transaction:', txSignature);
 
       setShowSuccess(true);
@@ -69,6 +98,27 @@ export default function CreateGroupScreen() {
       console.error('Failed to create group:', error);
       Alert.alert('Error', `Failed to create group: ${error.message}`);
     }
+  };
+
+  const renderContact = ({ item }: { item: any }) => {
+    const pubkey = item.publicKey.toBase58();
+    const isSelected = selectedContacts.has(pubkey);
+
+    return (
+      <List.Item
+        title={item.displayName || pubkey.slice(0, 16) + '...'}
+        description={pubkey.slice(0, 32) + '...'}
+        left={(props) => (
+          <Checkbox
+            {...props}
+            status={isSelected ? 'checked' : 'unchecked'}
+            onPress={() => toggleContact(pubkey)}
+          />
+        )}
+        onPress={() => toggleContact(pubkey)}
+        style={styles.contactItem}
+      />
+    );
   };
 
   return (
@@ -125,6 +175,51 @@ export default function CreateGroupScreen() {
           </View>
         )}
 
+        <View style={styles.contactsSection}>
+          <Text variant="titleMedium" style={styles.sectionTitle}>
+            Invite Members (Optional)
+          </Text>
+          <Text variant="bodySmall" style={styles.subtitle}>
+            Select contacts to invite in the same transaction
+          </Text>
+
+          {acceptedContacts.length > 0 && (
+            <Searchbar
+              placeholder="Search contacts..."
+              onChangeText={setSearchQuery}
+              value={searchQuery}
+              style={styles.searchbar}
+            />
+          )}
+
+          {acceptedContacts.length === 0 ? (
+            <Text variant="bodyMedium" style={styles.noContactsText}>
+              No contacts available. Add contacts first to invite them to groups.
+            </Text>
+          ) : (
+            <View style={styles.contactsList}>
+              <FlatList
+                data={filteredContacts}
+                keyExtractor={(item) => item.publicKey.toBase58()}
+                renderItem={renderContact}
+                scrollEnabled={false}
+                ListEmptyComponent={
+                  <Text variant="bodyMedium" style={styles.noContactsText}>
+                    No contacts match your search
+                  </Text>
+                }
+              />
+            </View>
+          )}
+
+          {selectedContacts.size > 0 && (
+            <Text variant="bodySmall" style={styles.selectionInfo}>
+              {selectedContacts.size} member(s) selected
+              {selectedContacts.size > 8 && ' (⚠️ Multiple transactions will be needed for >8 members)'}
+            </Text>
+          )}
+        </View>
+
         <Button
           mode="contained"
           onPress={handleCreateGroup}
@@ -132,11 +227,15 @@ export default function CreateGroupScreen() {
           disabled={loading || !groupName.trim()}
           style={styles.createButton}
         >
-          Create Group
+          {selectedContacts.size > 0
+            ? `Create Group & Invite ${selectedContacts.size} Members`
+            : 'Create Group'}
         </Button>
 
         <Text variant="bodySmall" style={styles.infoText}>
-          After creating the group, you can invite contacts from your list.
+          {selectedContacts.size > 0
+            ? 'Group and invitations will be sent in a single transaction'
+            : 'You can invite members later from the group settings'}
         </Text>
       </View>
 
@@ -195,6 +294,37 @@ const styles = StyleSheet.create({
   },
   infoText: {
     color: '#888',
+    textAlign: 'center',
+  },
+  contactsSection: {
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  searchbar: {
+    marginVertical: 12,
+    backgroundColor: '#1a1a1a',
+  },
+  contactsList: {
+    maxHeight: 300,
+    marginTop: 8,
+  },
+  contactItem: {
+    backgroundColor: '#1a1a1a',
+    marginBottom: 4,
+    borderRadius: 8,
+  },
+  noContactsText: {
+    color: '#888',
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
+  selectionInfo: {
+    color: '#4CAF50',
+    marginTop: 12,
     textAlign: 'center',
   },
 });
