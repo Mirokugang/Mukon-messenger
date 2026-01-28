@@ -3,7 +3,7 @@ use anchor_spl::token::{Token, TokenAccount};
 use sha2::{Digest, Sha256};
 use arcium_anchor::prelude::*;
 
-declare_id!("DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv");
+declare_id!("GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj");
 
 #[error_code]
 pub enum ErrorCode {
@@ -69,8 +69,15 @@ pub mod mukon_messenger {
 
         require!(display_name.len() <= 32, ErrorCode::DisplayNameTooLong);
 
-        wallet_descriptor.owner = payer.key();
-        wallet_descriptor.peers = vec![];
+        // Only initialize peers if this is a new account (not created by an invite)
+        // If account was created by invite instruction, peers already has pending invitations
+        if wallet_descriptor.owner == Pubkey::default() {
+            wallet_descriptor.owner = payer.key();
+            wallet_descriptor.peers = vec![];
+        } else {
+            // Account exists (created by invite) - just update owner, preserve peers
+            wallet_descriptor.owner = payer.key();
+        }
 
         user_profile.owner = payer.key();
         user_profile.display_name = display_name.clone();
@@ -117,8 +124,8 @@ pub mod mukon_messenger {
     /// Close profile account and return rent (useful for testing/redeployment)
     /// WARNING: This is a destructive operation - use with caution!
     pub fn close_profile(ctx: Context<CloseProfile>) -> Result<()> {
-        // Verify the PDA is correct (prevents closing wrong accounts)
-        let (expected_pda, _bump) = Pubkey::find_program_address(
+        // Verify UserProfile PDA
+        let (expected_profile_pda, _) = Pubkey::find_program_address(
             &[
                 b"user_profile",
                 ctx.accounts.payer.key().as_ref(),
@@ -129,16 +136,39 @@ pub mod mukon_messenger {
 
         require_keys_eq!(
             ctx.accounts.user_profile.key(),
-            expected_pda,
+            expected_profile_pda,
             ErrorCode::InvalidHash
         );
 
-        // Manually close the account and transfer lamports to payer
-        let user_profile_lamports = ctx.accounts.user_profile.lamports();
-        **ctx.accounts.user_profile.lamports.borrow_mut() = 0;
-        **ctx.accounts.payer.lamports.borrow_mut() += user_profile_lamports;
+        // Verify WalletDescriptor PDA
+        let (expected_descriptor_pda, _) = Pubkey::find_program_address(
+            &[
+                b"wallet_descriptor",
+                ctx.accounts.payer.key().as_ref(),
+                WALLET_DESCRIPTOR_VERSION.as_ref(),
+            ],
+            ctx.program_id,
+        );
 
-        msg!("Profile closed: {:?}", ctx.accounts.payer.key());
+        require_keys_eq!(
+            ctx.accounts.wallet_descriptor.key(),
+            expected_descriptor_pda,
+            ErrorCode::InvalidHash
+        );
+
+        // Close UserProfile
+        let profile_lamports = ctx.accounts.user_profile.lamports();
+        **ctx.accounts.user_profile.lamports.borrow_mut() = 0;
+        **ctx.accounts.payer.lamports.borrow_mut() += profile_lamports;
+        ctx.accounts.user_profile.try_borrow_mut_data()?.fill(0);
+
+        // Close WalletDescriptor
+        let descriptor_lamports = ctx.accounts.wallet_descriptor.lamports();
+        **ctx.accounts.wallet_descriptor.lamports.borrow_mut() = 0;
+        **ctx.accounts.payer.lamports.borrow_mut() += descriptor_lamports;
+        ctx.accounts.wallet_descriptor.try_borrow_mut_data()?.fill(0);
+
+        msg!("Profile and descriptor closed: {:?}", ctx.accounts.payer.key());
         Ok(())
     }
 
@@ -669,9 +699,9 @@ pub struct GroupInvite {
 #[instruction(display_name: String, avatar_data: String, encryption_public_key: [u8; 32])]
 pub struct Register<'info> {
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
-        space = 8 + 32 + 4,
+        space = 8 + 32 + 4 + 100 * (32 + 1),  // Same size as invite creates
         seeds = [b"wallet_descriptor", payer.key().as_ref(), WALLET_DESCRIPTOR_VERSION.as_ref()],
         bump
     )]
@@ -710,6 +740,9 @@ pub struct CloseProfile<'info> {
     /// CHECK: Old account structure may not deserialize. Client must pass correct PDA.
     #[account(mut)]
     pub user_profile: UncheckedAccount<'info>,
+    /// CHECK: Old WalletDescriptor may not deserialize. Client must pass correct PDA.
+    #[account(mut)]
+    pub wallet_descriptor: UncheckedAccount<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,

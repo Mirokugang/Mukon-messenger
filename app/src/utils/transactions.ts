@@ -8,7 +8,7 @@ import {
 } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 
-const PROGRAM_ID = new PublicKey('DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv');
+const PROGRAM_ID = new PublicKey('GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj');
 
 // Instruction discriminators from IDL
 // NOTE: Group discriminators need to be computed after program deployment
@@ -121,13 +121,16 @@ export function createCloseProfileInstruction(
   payer: PublicKey
 ): TransactionInstruction {
   const userProfile = getUserProfilePDA(payer);
+  const walletDescriptor = getWalletDescriptorPDA(payer);
 
   const data = DISCRIMINATORS.close_profile;
 
   return new TransactionInstruction({
     keys: [
       { pubkey: userProfile, isSigner: false, isWritable: true },
+      { pubkey: walletDescriptor, isSigner: false, isWritable: true },
       { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM_ID,
     data,
@@ -215,7 +218,8 @@ export function createRejectInstruction(
   });
 }
 
-// Alias for consistency
+// Aliases for consistency
+export const createAcceptInvitationInstruction = createAcceptInstruction;
 export const createRejectInvitationInstruction = createRejectInstruction;
 
 /**
@@ -359,7 +363,7 @@ export function createCreateGroupInstruction(
   const group = getGroupPDA(groupId);
 
   const data = Buffer.concat([
-    DISCRIMINATORS.createGroup,
+    DISCRIMINATORS.create_group,
     Buffer.from(groupId),
     serializeString(name),
     Buffer.from(encryptionPubkey),
@@ -388,7 +392,7 @@ export function createUpdateGroupInstruction(
 ): TransactionInstruction {
   const group = getGroupPDA(groupId);
 
-  const parts: Buffer[] = [DISCRIMINATORS.updateGroup];
+  const parts: Buffer[] = [DISCRIMINATORS.update_group];
 
   // Serialize Option<String> for name
   if (name !== null) {
@@ -425,7 +429,7 @@ export function createInviteToGroupInstruction(
   const group = getGroupPDA(groupId);
   const groupInvite = getGroupInvitePDA(groupId, invitee);
 
-  const data = DISCRIMINATORS.inviteToGroup;
+  const data = DISCRIMINATORS.invite_to_group;
 
   return new TransactionInstruction({
     keys: [
@@ -451,7 +455,7 @@ export function createAcceptGroupInviteInstruction(
   const group = getGroupPDA(groupId);
   const groupInvite = getGroupInvitePDA(groupId, payer);
 
-  const data = DISCRIMINATORS.acceptGroupInvite;
+  const data = DISCRIMINATORS.accept_group_invite;
 
   const keys = [
     { pubkey: group, isSigner: false, isWritable: true },
@@ -490,7 +494,7 @@ export function createRejectGroupInviteInstruction(
 ): TransactionInstruction {
   const groupInvite = getGroupInvitePDA(groupId, payer);
 
-  const data = DISCRIMINATORS.rejectGroupInvite;
+  const data = DISCRIMINATORS.reject_group_invite;
 
   return new TransactionInstruction({
     keys: [
@@ -511,7 +515,7 @@ export function createLeaveGroupInstruction(
 ): TransactionInstruction {
   const group = getGroupPDA(groupId);
 
-  const data = DISCRIMINATORS.leaveGroup;
+  const data = DISCRIMINATORS.leave_group;
 
   return new TransactionInstruction({
     keys: [
@@ -534,7 +538,7 @@ export function createKickMemberInstruction(
 ): TransactionInstruction {
   const group = getGroupPDA(groupId);
 
-  const data = DISCRIMINATORS.kickMember;
+  const data = DISCRIMINATORS.kick_member;
 
   return new TransactionInstruction({
     keys: [

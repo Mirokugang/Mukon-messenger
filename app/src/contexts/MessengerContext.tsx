@@ -928,6 +928,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     if (wallet?.publicKey && encryptionKeys) {
       loadProfile();
       loadContacts();
+      loadGroups();
     }
   }, [wallet?.publicKey, encryptionKeys]);
 
@@ -1240,13 +1241,66 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     if (!wallet?.publicKey) return;
 
     try {
-      // Query all groups where user is a member
-      // For MVP, we'll need to fetch all user's group PDAs or use a RPC getProgramAccounts call
-      // For now, placeholder - will implement when we have the backend index
-      console.log('TODO: Implement loadGroups() - query user groups from program');
-      setGroups([]);
+      console.log('📂 Loading groups for user...');
+
+      // Strategy: Find all GroupInvite accounts where this user is the invitee with status=Accepted
+      // Then fetch the corresponding Group account for each
+      const PROGRAM_ID = new PublicKey('GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj');
+
+      const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
+        filters: [
+          {
+            // Filter for GroupInvite accounts (discriminator check if needed)
+            dataSize: 8 + 32 + 32 + 32 + 1 + 8, // discriminator + groupId + inviter + invitee + status + createdAt
+          },
+          {
+            // Filter for accounts where invitee = wallet.publicKey (offset 8 + 32 + 32 = 72)
+            memcmp: {
+              offset: 72,
+              bytes: wallet.publicKey.toBase58(),
+            },
+          },
+        ],
+      });
+
+      console.log(`Found ${accounts.length} group invite accounts`);
+
+      // Filter for Accepted status (status byte = 1) and fetch Group data
+      const loadedGroups: Group[] = [];
+      const uniqueGroupIds = new Set<string>();
+
+      for (const { account } of accounts) {
+        try {
+          const invite = deserializeGroupInvite(account.data);
+
+          // Only process Accepted invites
+          if (invite.status === 'Accepted') {
+            const groupIdHex = Buffer.from(invite.groupId).toString('hex');
+
+            // Skip if we've already loaded this group
+            if (uniqueGroupIds.has(groupIdHex)) continue;
+            uniqueGroupIds.add(groupIdHex);
+
+            // Fetch the Group account
+            const groupPDA = getGroupPDA(invite.groupId);
+            const groupAccountInfo = await connection.getAccountInfo(groupPDA);
+
+            if (groupAccountInfo) {
+              const group = deserializeGroup(groupAccountInfo.data);
+              loadedGroups.push(group);
+              console.log(`✅ Loaded group: ${group.name} (${group.members.length} members)`);
+            }
+          }
+        } catch (error) {
+          console.error('Failed to deserialize group invite:', error);
+        }
+      }
+
+      setGroups(loadedGroups);
+      console.log(`📂 Loaded ${loadedGroups.length} groups`);
     } catch (error) {
       console.error('Failed to load groups:', error);
+      setGroups([]);
     }
   };
 

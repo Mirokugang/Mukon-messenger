@@ -149,12 +149,12 @@ adb install -r app-debug.apk
 
 ---
 
-## Current Status (as of 2026-01-26)
+## Current Status (as of 2026-01-28)
 
 ### ✅ DM MVP COMPLETE - Now Implementing Group Chat!
 
 **What's Deployed:**
-- NEW Solana program on devnet: `DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv`
+- NEW Solana program on devnet: `GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj`
 - **DM Instructions:** register (with encryption key), invite, accept, reject, update_profile, block, unblock, close_profile
 - **Group Instructions:** create_group, update_group, invite_to_group, accept_group_invite, reject_group_invite, leave_group, kick_member
 - Backend WebSocket server running on 192.168.1.33:3001 (host IP for physical device)
@@ -247,12 +247,30 @@ adb install -r app-debug.apk
 3. ✅ **Socket.IO connection timeout** - FIXED with transport order matching backend (Jan 20)
 4. ✅ **Contact management** - FIXED with block/unblock + symmetric deletion (Jan 20)
 5. ✅ **Message deletion** - FIXED with Telegram-style delete for self/everyone (Jan 20)
+6. ✅ **ConstraintSpace error on registration** - FIXED: close_profile now closes BOTH UserProfile and WalletDescriptor (Jan 28)
+7. ✅ **NotRequested error when accepting invitations** - FIXED: register now preserves pending invitations (Jan 28)
 
-**Remaining Issues (Post-Hackathon):**
-1. **Wallet connection persistence** - Closing/reopening app requires full reconnect
-2. **Backend message persistence** - Currently in-memory only, need SQLite/Redis
-3. **Domain resolution verification** - Code implemented but needs testing on mainnet with real domains
-4. **Group key rotation** - Currently only rotates on kick, should rotate on all member changes (security debt)
+**Critical Fixes (Jan 28):**
+
+**Issue 1: ConstraintSpace Error During Re-registration**
+- **Problem:** close_profile only closed UserProfile, left 77-byte WalletDescriptor on-chain
+- **Result:** Re-registration failed with "ConstraintSpace. Left: 3344, Right: 77"
+- **Fix:** Updated close_profile instruction to close BOTH accounts and return full rent
+- **Impact:** Clean re-registration flow for devnet development
+
+**Issue 2: NotRequested Error When Accepting Invitations**
+- **Problem:** register instruction unconditionally set `wallet_descriptor.peers = vec![]`
+- **Result:** Invitations sent before target registered were erased during registration
+- **Fix:** register now checks if WalletDescriptor exists (owner != default) and preserves peers
+- **Impact:** Invite-before-register flow now works correctly
+
+**Remaining Known Issues:**
+1. **Group creators can't see their groups** - loadGroups() only queries GroupInvite accounts, but creators are added directly to Group.members (identified Jan 28)
+2. **Group creation requires multiple transactions** - Current: create_group (1 tx) + invite per member (N txs), desired: single batched transaction (identified Jan 28)
+3. **Wallet connection persistence** - Closing/reopening app requires full reconnect
+4. **Backend message persistence** - Currently in-memory only, need SQLite/Redis
+5. **Domain resolution verification** - Code implemented but needs testing on mainnet with real domains
+6. **Group key rotation** - Currently only rotates on kick, should rotate on all member changes (security debt)
 
 **Next Steps:**
 1. ✅ ~~Test messaging between wallets~~ - WORKING!
@@ -300,7 +318,7 @@ A 1:1 encrypted messenger (like Line/WeChat DMs) where:
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │               SOLANA PROGRAM (Anchor + Arcium)              │
-│  Program ID: DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv  │
+│  Program ID: GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj  │
 │                                                             │
 │  Accounts:                                                  │
 │  ├── UserProfile (display name, avatar, encryption pubkey)  │
@@ -1221,7 +1239,7 @@ The new code changes `register()` to include `avatar_data`:
 ### Manual E2E Testing Flow
 
 **Prerequisites:**
-- Both wallets must register on the NEW program (DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv)
+- Both wallets must register on the NEW program (GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj)
 - Backend running on 192.168.1.33:3001
 - Metro running with cache clear: `npm start -- --reset-cache`
 

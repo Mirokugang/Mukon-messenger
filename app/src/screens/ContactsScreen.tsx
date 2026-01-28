@@ -196,6 +196,7 @@ export default function ContactsScreen({ navigation }: any) {
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <Button
                 mode="contained"
+                compact
                 onPress={async () => {
                   try {
                     await messenger.acceptInvitation(new PublicKey(item.pubkey));
@@ -210,6 +211,7 @@ export default function ContactsScreen({ navigation }: any) {
               </Button>
               <Button
                 mode="outlined"
+                compact
                 onPress={async () => {
                   try {
                     await messenger.rejectInvitation(new PublicKey(item.pubkey));
@@ -467,6 +469,7 @@ export default function ContactsScreen({ navigation }: any) {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.chipScrollView}
         contentContainerStyle={styles.chipContainer}
       >
         <Chip
@@ -572,6 +575,10 @@ const styles = StyleSheet.create({
     margin: 16,
     marginBottom: 8,
     backgroundColor: theme.colors.surface,
+  },
+  chipScrollView: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
   chipContainer: {
     paddingHorizontal: 16,
