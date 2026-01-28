@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
   chipContainer: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    gap: 8,
+    flexDirection: 'row',
   },
   chip: {
     marginRight: 8,

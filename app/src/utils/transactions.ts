@@ -122,7 +122,7 @@ export function createCloseProfileInstruction(
 ): TransactionInstruction {
   const userProfile = getUserProfilePDA(payer);
 
-  const data = DISCRIMINATORS.closeProfile;
+  const data = DISCRIMINATORS.close_profile;
 
   return new TransactionInstruction({
     keys: [
