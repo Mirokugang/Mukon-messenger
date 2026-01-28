@@ -24,6 +24,7 @@ import {
   createRejectGroupInviteInstruction,
   createLeaveGroupInstruction,
   createKickMemberInstruction,
+  createCloseGroupInstruction,
   buildTransaction,
   deserializeWalletDescriptor,
   deserializeGroup,
@@ -92,12 +93,14 @@ interface MessengerContextType {
   rejectGroupInvite: (groupId: Uint8Array) => Promise<string>;
   leaveGroup: (groupId: Uint8Array) => Promise<string>;
   kickMember: (groupId: Uint8Array, memberPubkey: PublicKey) => Promise<string>;
+  closeGroup: (groupId: Uint8Array) => Promise<string>;
   sendGroupMessage: (groupId: string, content: string) => Promise<void>;
   loadGroups: () => Promise<void>;
   loadGroupInvites: () => Promise<void>;
   loadGroupMessages: (groupId: string) => Promise<void>;
   joinGroupRoom: (groupId: string) => void;
   leaveGroupRoom: (groupId: string) => void;
+  wallet: WalletContextType | null;
 }
 
 const MessengerContext = createContext<MessengerContextType | null>(null);
@@ -841,6 +844,9 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
               offset += 4;
               displayName = data.slice(offset, offset + displayNameLength).toString('utf-8');
               offset += displayNameLength;
+              // Read avatar_type (1 byte enum) - CRITICAL FIX
+              const avatarType = data.readUInt8(offset);
+              offset += 1;
               const avatarUrlLength = data.readUInt32LE(offset);
               offset += 4;
               avatarUrl = data.slice(offset, offset + avatarUrlLength).toString('utf-8');
@@ -901,6 +907,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       const displayName = Buffer.from(displayNameBytes).toString('utf8');
       offset += displayNameLength;
 
+      // Read avatar_type (1 byte enum) - CRITICAL FIX
+      const avatarType = data.readUInt8(offset);
+      offset += 1;
+
       const avatarUrlLength = data.readUInt32LE(offset);
       offset += 4;
       const avatarUrlBytes = data.slice(offset, offset + avatarUrlLength);
@@ -930,6 +940,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       loadProfile();
       loadContacts();
       loadGroups();
+      loadGroupInvites();
     }
   }, [wallet?.publicKey, encryptionKeys]);
 
@@ -1137,6 +1148,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           groupId: groupIdHex,
           memberPubkey: wallet.publicKey.toBase58(),
         });
+
+        // Request group key from backend (in case we were offline when invited)
+        socket.emit('request_group_key', { groupId: groupIdHex });
+        console.log('🔑 Requested group key from backend');
       }
 
       return txSignature;
@@ -1233,6 +1248,43 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       return txSignature;
     } catch (error) {
       console.error('Failed to kick member:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeGroup = async (groupId: Uint8Array) => {
+    if (!wallet?.publicKey || !wallet.signTransaction) throw new Error('Wallet not connected');
+
+    setLoading(true);
+    try {
+      const instruction = createCloseGroupInstruction(wallet.publicKey, groupId);
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const txSignature = await connection.sendTransaction(signedTransaction);
+      await connection.confirmTransaction(txSignature, 'confirmed');
+
+      // Remove group key from local storage
+      const groupIdHex = Buffer.from(groupId).toString('hex');
+      setGroupKeys(prev => {
+        const updated = new Map(prev);
+        updated.delete(groupIdHex);
+        return updated;
+      });
+
+      // Notify group via socket
+      if (socket) {
+        socket.emit('group_deleted', {
+          groupId: groupIdHex,
+        });
+      }
+
+      await loadGroups();
+      console.log('✅ Group closed, account rent returned');
+      return txSignature;
+    } catch (error) {
+      console.error('Failed to close group:', error);
       throw error;
     } finally {
       setLoading(false);
@@ -1402,12 +1454,55 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     if (!wallet?.publicKey) return;
 
     try {
-      // Query all group invites for this user
-      // For MVP, we'll need to fetch all group invite PDAs for this user
-      console.log('TODO: Implement loadGroupInvites() - query user group invites');
-      setGroupInvites([]);
+      console.log('📬 Loading group invites...');
+      const PROGRAM_ID = new PublicKey('GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj');
+
+      // Query GroupInvite accounts where invitee = wallet.publicKey
+      const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
+        filters: [
+          {
+            dataSize: 8 + 32 + 32 + 32 + 1 + 8, // GroupInvite size
+          },
+          {
+            // Filter for accounts where invitee = wallet.publicKey (offset 72)
+            memcmp: {
+              offset: 72,
+              bytes: wallet.publicKey.toBase58(),
+            },
+          },
+        ],
+      });
+
+      console.log(`Found ${accounts.length} group invite accounts`);
+
+      // Deserialize and filter for Pending status, verify group still exists
+      const validInvites: GroupInvite[] = [];
+      for (const { account } of accounts) {
+        try {
+          const invite = deserializeGroupInvite(account.data);
+
+          // Only include Pending invites
+          if (invite.status === 'Pending') {
+            // Verify group still exists before showing invite
+            const groupPDA = getGroupPDA(invite.groupId);
+            const groupAccount = await connection.getAccountInfo(groupPDA);
+
+            if (groupAccount) {
+              validInvites.push(invite);
+            } else {
+              console.log(`⚠️ Skipping stale invite for deleted group ${Buffer.from(invite.groupId).toString('hex').slice(0, 8)}...`);
+            }
+          }
+        } catch (error) {
+          console.error('Failed to deserialize group invite:', error);
+        }
+      }
+
+      setGroupInvites(validInvites);
+      console.log(`📬 Loaded ${validInvites.length} valid pending group invites`);
     } catch (error) {
       console.error('Failed to load group invites:', error);
+      setGroupInvites([]);
     }
   };
 
@@ -1496,12 +1591,14 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     rejectGroupInvite,
     leaveGroup,
     kickMember,
+    closeGroup,
     sendGroupMessage,
     loadGroups,
     loadGroupInvites,
     loadGroupMessages,
     joinGroupRoom,
     leaveGroupRoom,
+    wallet,
   };
 
   return (

@@ -8,12 +8,13 @@ import { PublicKey } from '@solana/web3.js';
 export default function GroupInfoScreen() {
   const route = useRoute();
   const navigation = useNavigation();
-  const { groupId, groupName } = route.params as { groupId: string; groupName: string };
+  const { groupId, groupName: routeGroupName } = route.params as { groupId: string; groupName?: string };
 
   const { groups, leaveGroup, kickMember, wallet, loading } = useMessenger();
 
   const [group, setGroup] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isMember, setIsMember] = useState(false);
 
   useEffect(() => {
     // Find group in loaded groups
@@ -22,8 +23,12 @@ export default function GroupInfoScreen() {
 
     if (foundGroup && wallet?.publicKey) {
       setIsAdmin(foundGroup.creator.equals(wallet.publicKey));
+      setIsMember(foundGroup.members.some((m: PublicKey) => m.equals(wallet.publicKey)));
     }
   }, [groups, groupId, wallet]);
+
+  // Use route groupName or fall back to group.name or default
+  const displayName = routeGroupName || group?.name || 'Group';
 
   const handleInviteMember = () => {
     navigation.navigate('InviteMember' as never, { groupId, groupName } as never);
@@ -85,9 +90,9 @@ export default function GroupInfoScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Avatar.Text size={80} label={groupName.slice(0, 2).toUpperCase()} />
+        <Avatar.Text size={80} label={(displayName || 'GR').slice(0, 2).toUpperCase()} />
         <Text variant="headlineSmall" style={styles.groupName}>
-          {groupName}
+          {displayName}
         </Text>
         <Text variant="bodyMedium" style={styles.memberCount}>
           {group.members.length} members
@@ -164,7 +169,7 @@ export default function GroupInfoScreen() {
       </List.Section>
 
       <View style={styles.actions}>
-        {isAdmin && (
+        {isMember && (
           <Button
             mode="contained"
             icon="account-plus"
@@ -175,7 +180,7 @@ export default function GroupInfoScreen() {
           </Button>
         )}
 
-        {!isAdmin && (
+        {isMember && !isAdmin && (
           <Button
             mode="outlined"
             icon="exit-to-app"

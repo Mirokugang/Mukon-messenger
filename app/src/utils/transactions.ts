@@ -17,6 +17,7 @@ const DISCRIMINATORS = {
   accept: Buffer.from([0x41, 0x96, 0x46, 0xd8, 0x85, 0x06, 0x6b, 0x04]), // 419646d885066b04
   accept_group_invite: Buffer.from([0xbe, 0x30, 0x7f, 0x36, 0x49, 0x93, 0xe3, 0xfd]), // be307f364993e3fd
   block: Buffer.from([0xee, 0xea, 0x6e, 0x15, 0x79, 0x2b, 0x32, 0x91]), // eeea6e15792b3291
+  close_group: Buffer.from([0x28, 0xbb, 0xc9, 0xbb, 0x12, 0xc2, 0x7a, 0xe8]), // 28bbc9bb12c27ae8
   close_profile: Buffer.from([0xa7, 0x24, 0xb5, 0x08, 0x88, 0x9e, 0x2e, 0xcf]), // a724b508889e2ecf
   create_group: Buffer.from([0x4f, 0x3c, 0x9e, 0x86, 0x3d, 0xc7, 0x38, 0xf8]), // 4f3c9e863dc738f8
   invite: Buffer.from([0xf2, 0x18, 0xeb, 0xe1, 0x85, 0xd3, 0xbd, 0xfa]), // f218ebe185d3bdfa
@@ -283,7 +284,7 @@ export function createUpdateProfileInstruction(
   const userProfile = getUserProfilePDA(payer);
 
   // Serialize instruction data: discriminator + Option<String> + Option<AvatarType> + Option<String> + Option<[u8; 32]>
-  const parts: Buffer[] = [DISCRIMINATORS.updateProfile];
+  const parts: Buffer[] = [DISCRIMINATORS.update_profile];
 
   // Serialize Option<String> for display_name
   if (displayName !== null) {
@@ -454,29 +455,23 @@ export function createAcceptGroupInviteInstruction(
 ): TransactionInstruction {
   const group = getGroupPDA(groupId);
   const groupInvite = getGroupInvitePDA(groupId, payer);
+  const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
   const data = DISCRIMINATORS.accept_group_invite;
 
+  // IMPORTANT: Anchor Option<Account> requires ALWAYS passing an account
+  // For None: pass program ID as placeholder
+  // For Some: pass actual account
   const keys = [
     { pubkey: group, isSigner: false, isWritable: true },
     { pubkey: groupInvite, isSigner: false, isWritable: true },
-  ];
-
-  // Add token account if provided (for token-gated groups)
-  if (userTokenAccount !== null) {
-    keys.push({ pubkey: userTokenAccount, isSigner: false, isWritable: false });
-  }
-
-  keys.push(
+    // ALWAYS include user_token_account - use program ID for None
+    { pubkey: userTokenAccount ?? PROGRAM_ID, isSigner: false, isWritable: false },
     { pubkey: payer, isSigner: true, isWritable: true },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
-  );
-
-  // Add token program if token account provided
-  if (userTokenAccount !== null) {
-    const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-    keys.push({ pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false });
-  }
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    // ALWAYS include token_program - use program ID for None
+    { pubkey: userTokenAccount ? TOKEN_PROGRAM_ID : PROGRAM_ID, isSigner: false, isWritable: false },
+  ];
 
   return new TransactionInstruction({
     keys,
@@ -546,6 +541,27 @@ export function createKickMemberInstruction(
       { pubkey: member, isSigner: false, isWritable: false },
       { pubkey: payer, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Build close_group instruction (admin only - deletes group)
+ */
+export function createCloseGroupInstruction(
+  payer: PublicKey,
+  groupId: Uint8Array
+): TransactionInstruction {
+  const group = getGroupPDA(groupId);
+
+  const data = DISCRIMINATORS.close_group;
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: group, isSigner: false, isWritable: true },
+      { pubkey: payer, isSigner: true, isWritable: true },
     ],
     programId: PROGRAM_ID,
     data,

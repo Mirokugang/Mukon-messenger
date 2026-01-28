@@ -456,10 +456,10 @@ pub mod mukon_messenger {
     pub fn invite_to_group(ctx: Context<InviteToGroup>) -> Result<()> {
         let group = &ctx.accounts.group;
 
-        // Only creator can invite (admin-only for MVP)
+        // Any member can invite (creator can kick bad actors)
         require!(
-            group.creator == ctx.accounts.payer.key(),
-            ErrorCode::NotGroupAdmin
+            group.members.contains(&ctx.accounts.payer.key()),
+            ErrorCode::NotGroupMember
         );
 
         // Check if group is full
@@ -605,6 +605,25 @@ pub mod mukon_messenger {
 
         msg!("Kicked from group: group={:?}, member={:?}",
              group.group_id, ctx.accounts.member.key());
+
+        Ok(())
+    }
+
+    pub fn close_group(ctx: Context<CloseGroup>) -> Result<()> {
+        let group = &ctx.accounts.group;
+
+        // Only creator can delete
+        require!(
+            group.creator == ctx.accounts.payer.key(),
+            ErrorCode::NotGroupAdmin
+        );
+
+        // Transfer lamports back to creator
+        let group_lamports = ctx.accounts.group.to_account_info().lamports();
+        **ctx.accounts.group.to_account_info().lamports.borrow_mut() = 0;
+        **ctx.accounts.payer.lamports.borrow_mut() += group_lamports;
+
+        msg!("Group closed: group={:?}", group.group_id);
 
         Ok(())
     }
@@ -985,4 +1004,17 @@ pub struct KickMember<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseGroup<'info> {
+    #[account(
+        mut,
+        close = payer,
+        seeds = [b"group", group.group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump
+    )]
+    pub group: Account<'info, Group>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
 }

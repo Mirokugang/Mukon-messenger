@@ -28,6 +28,7 @@ const onlineUsers = new Map(); // pubkey -> socket.id
 // Group storage
 const groupMessages = new Map(); // groupId -> Message[]
 const groupRooms = new Map(); // groupId -> Set<socket.id>
+const pendingKeyShares = new Map(); // groupId -> Map<recipientPubkey, { encryptedKey, nonce, senderPubkey }>
 
 // Verify wallet signature
 function verifySignature(publicKey, message, signature) {
@@ -390,8 +391,37 @@ io.on('connection', (socket) => {
       });
       console.log('✅ Group key shared via socket');
     } else {
-      console.log('⚠️  Recipient not online, will share key when they join');
-      // TODO: Store pending key shares for offline users
+      // Store for later retrieval
+      if (!pendingKeyShares.has(groupId)) {
+        pendingKeyShares.set(groupId, new Map());
+      }
+      pendingKeyShares.get(groupId).set(recipientPubkey, {
+        encryptedKey,
+        nonce,
+        senderPubkey: socket.publicKey
+      });
+      console.log('📦 Stored pending key share for offline user');
+    }
+  });
+
+  socket.on('request_group_key', ({ groupId }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    const pending = pendingKeyShares.get(groupId)?.get(socket.publicKey);
+    if (pending) {
+      socket.emit('group_key_shared', {
+        groupId,
+        senderPubkey: pending.senderPubkey,
+        encryptedKey: pending.encryptedKey,
+        nonce: pending.nonce,
+      });
+      pendingKeyShares.get(groupId).delete(socket.publicKey);
+      console.log(`🔑 Delivered pending key share for ${groupId.slice(0, 8)}... to ${socket.publicKey.slice(0, 8)}...`);
+    } else {
+      console.log(`⚠️ No pending key share found for ${socket.publicKey.slice(0, 8)}... in group ${groupId.slice(0, 8)}...`);
     }
   });
 

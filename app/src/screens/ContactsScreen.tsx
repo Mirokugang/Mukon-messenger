@@ -19,6 +19,7 @@ export default function ContactsScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [registering, setRegistering] = React.useState(false);
   const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
+  const [groupMenuVisible, setGroupMenuVisible] = React.useState<string | null>(null);
   const [renameDialogVisible, setRenameDialogVisible] = React.useState(false);
   const [renamingContact, setRenamingContact] = React.useState<{ pubkey: string; currentName: string } | null>(null);
   const [newName, setNewName] = React.useState('');
@@ -139,35 +140,113 @@ export default function ContactsScreen({ navigation }: any) {
   const renderContact = ({ item }: any) => {
     // Handle groups differently
     if (item.type === 'group') {
+      const group = item.group;
+      const isCreator = wallet.publicKey?.equals(group.creator);
+
       return (
-        <TouchableOpacity
-          onPress={() => navigation.navigate('GroupChat', {
-            groupId: item.id,
-            groupName: item.displayName,
-          })}
-        >
-          <List.Item
-            title={item.displayName}
-            description={item.lastMessage || 'Tap to open group'}
-            left={(props) => (
-              <Avatar.Icon
-                {...props}
-                size={48}
-                icon="account-group"
-                style={{ backgroundColor: theme.colors.secondary }}
-              />
-            )}
-            right={(props) => (
-              <View style={styles.rightContainer}>
-                {item.timestamp && <Text style={styles.timestamp}>{item.timestamp}</Text>}
-                {item.unread > 0 && (
-                  <Badge style={styles.badge}>{item.unread}</Badge>
+        <Menu
+          visible={groupMenuVisible === item.id}
+          onDismiss={() => setGroupMenuVisible(null)}
+          anchor={
+            <TouchableOpacity
+              onPress={() => navigation.navigate('GroupChat', {
+                groupId: item.id,
+                groupName: item.displayName,
+              })}
+              onLongPress={() => setGroupMenuVisible(item.id)}
+            >
+              <List.Item
+                title={item.displayName}
+                description={item.lastMessage || `${group.members.length} members`}
+                left={(props) => (
+                  <Avatar.Icon
+                    {...props}
+                    size={48}
+                    icon="account-group"
+                    style={{ backgroundColor: theme.colors.secondary }}
+                  />
                 )}
-              </View>
-            )}
-            style={styles.contactItem}
+                right={(props) => (
+                  <View style={styles.rightContainer}>
+                    {item.timestamp && <Text style={styles.timestamp}>{item.timestamp}</Text>}
+                    {item.unread > 0 && (
+                      <Badge style={styles.badge}>{item.unread}</Badge>
+                    )}
+                  </View>
+                )}
+                style={styles.contactItem}
+              />
+            </TouchableOpacity>
+          }
+        >
+          <Menu.Item
+            onPress={() => {
+              setGroupMenuVisible(null);
+              navigation.navigate('GroupInfo', {
+                groupId: item.id,
+                groupName: item.displayName
+              });
+            }}
+            title="View Info"
+            leadingIcon="information"
           />
-        </TouchableOpacity>
+          {!isCreator && (
+            <Menu.Item
+              onPress={() => {
+                setGroupMenuVisible(null);
+                Alert.alert(
+                  'Leave Group',
+                  `Leave "${item.displayName}"? You can be re-invited later.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Leave',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await messenger.leaveGroup(group.groupId);
+                          Alert.alert('Left', `You left "${item.displayName}"`);
+                        } catch (error: any) {
+                          Alert.alert('Error', error.message);
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+              title="Leave Group"
+              leadingIcon="exit-to-app"
+            />
+          )}
+          {isCreator && (
+            <Menu.Item
+              onPress={() => {
+                setGroupMenuVisible(null);
+                Alert.alert(
+                  'Delete Group',
+                  `Delete "${item.displayName}"? This will remove the group for all members.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await messenger.closeGroup(group.groupId);
+                          Alert.alert('Deleted', `"${item.displayName}" has been deleted`);
+                        } catch (error: any) {
+                          Alert.alert('Error', error.message);
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+              title="Delete Group"
+              leadingIcon="delete"
+            />
+          )}
+        </Menu>
       );
     }
 
@@ -506,6 +585,71 @@ export default function ContactsScreen({ navigation }: any) {
         </Chip>
       </ScrollView>
 
+      {/* Group Invites Section */}
+      {messenger.groupInvites.length > 0 && (
+        <View style={styles.invitesSection}>
+          <Text style={styles.invitesHeader}>Group Invitations ({messenger.groupInvites.length})</Text>
+          {messenger.groupInvites.map((invite) => {
+            // Fetch group info to display name
+            const group = messenger.groups.find(g =>
+              Buffer.from(g.groupId).toString('hex') === Buffer.from(invite.groupId).toString('hex')
+            );
+            const inviter = messenger.contacts.find(c => c.publicKey.equals(invite.inviter));
+            const groupIdHex = Buffer.from(invite.groupId).toString('hex');
+
+            return (
+              <List.Item
+                key={groupIdHex}
+                title={group?.name || 'Group Invite'}
+                description={inviter ? `Invited by ${inviter.displayName || truncateAddress(invite.inviter.toBase58(), 4)}` : 'Group invitation'}
+                left={(props) => (
+                  <Avatar.Icon
+                    {...props}
+                    size={48}
+                    icon="account-group"
+                    style={{ backgroundColor: theme.colors.accent }}
+                  />
+                )}
+                right={() => (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Button
+                      mode="contained"
+                      compact
+                      onPress={async () => {
+                        try {
+                          await messenger.acceptGroupInvite(invite.groupId);
+                          Alert.alert('Success', 'Group invitation accepted!');
+                        } catch (error: any) {
+                          Alert.alert('Error', error.message);
+                        }
+                      }}
+                      style={{ backgroundColor: theme.colors.secondary }}
+                    >
+                      Accept
+                    </Button>
+                    <Button
+                      mode="outlined"
+                      compact
+                      onPress={async () => {
+                        try {
+                          await messenger.rejectGroupInvite(invite.groupId);
+                          Alert.alert('Declined', 'Group invitation declined');
+                        } catch (error: any) {
+                          Alert.alert('Error', error.message);
+                        }
+                      }}
+                    >
+                      Decline
+                    </Button>
+                  </View>
+                )}
+                style={styles.contactItem}
+              />
+            );
+          })}
+        </View>
+      )}
+
       <FlatList
         data={filteredConversations}
         renderItem={renderContact}
@@ -660,5 +804,19 @@ const styles = StyleSheet.create({
   registrationButton: {
     width: '100%',
     maxWidth: 300,
+  },
+  invitesSection: {
+    backgroundColor: theme.colors.surface,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 8,
+    padding: 8,
+  },
+  invitesHeader: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.accent,
+    marginBottom: 4,
+    marginLeft: 8,
   },
 });

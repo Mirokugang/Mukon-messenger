@@ -26,7 +26,7 @@ export default function ProfileScreen() {
 
     try {
       // Update profile with new emoji
-      await messenger.updateProfile(displayName, emoji);
+      await messenger.updateProfile(displayName, 'Emoji', emoji);
       Alert.alert('Success', 'Avatar updated!');
     } catch (error: any) {
       Alert.alert('Error', 'Failed to update avatar');
@@ -36,7 +36,7 @@ export default function ProfileScreen() {
 
   const saveProfile = async () => {
     try {
-      await messenger.updateProfile(displayName.trim(), selectedEmoji || '');
+      await messenger.updateProfile(displayName.trim(), 'Emoji', selectedEmoji || undefined);
       Alert.alert('Success', 'Username updated!');
     } catch (error: any) {
       Alert.alert('Error', 'Failed to update username');

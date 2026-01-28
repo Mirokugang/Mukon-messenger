@@ -264,13 +264,53 @@ adb install -r app-debug.apk
 - **Fix:** register now checks if WalletDescriptor exists (owner != default) and preserves peers
 - **Impact:** Invite-before-register flow now works correctly
 
+**Critical Fixes - Session 2 (Jan 28 Evening):**
+
+**Issue 3: Profile Update Discriminator Typo**
+- **Problem:** `transactions.ts` line 287 used `DISCRIMINATORS.updateProfile` (camelCase) but key is `update_profile` (underscore)
+- **Error:** "Cannot read property 'length' of undefined"
+- **Fix:** Changed to `DISCRIMINATORS.update_profile` + updated ProfileScreen to pass all 3 args to updateProfile()
+- **Files:** `app/src/utils/transactions.ts`, `app/src/screens/ProfileScreen.tsx`
+
+**Issue 4: Add Members Button Missing**
+- **Problem:** `wallet` not exposed in MessengerContext, so `isAdmin` check always false
+- **Fix:** Added `wallet: WalletContextType | null` to interface and value object
+- **Impact:** GroupInfoScreen can now check if user is admin/member
+- **Files:** `app/src/contexts/MessengerContext.tsx`
+
+**Issue 5: DM Decryption Failing**
+- **Problem:** UserProfile deserialization MISSING `avatar_type` byte (1 byte enum between display_name and avatar_data)
+- **Error:** "Failed to decrypt message" + encryption keys starting with `00`
+- **Root Cause:** All fields after display_name read at wrong offset, encryption keys were garbage
+- **Fix:** Added `avatar_type` byte read in loadContacts() and loadProfile()
+- **Files:** `app/src/contexts/MessengerContext.tsx` (lines 847, 909)
+- **Impact:** CRITICAL - DM decryption now works correctly
+
+**Issue 6: Group Key Distribution Missing**
+- **Problem:** Group keys only shared via socket when invitee is online, no persistence for offline users
+- **Error:** "Group key not found - cannot encrypt message"
+- **Fix (Backend):** Added `pendingKeyShares` storage, `request_group_key` handler
+- **Fix (Client):** Call `socket.emit('request_group_key')` after accepting invite
+- **Files:** `backend/src/index.js`, `app/src/contexts/MessengerContext.tsx`
+- **Impact:** Invitees can receive group keys even if offline when invited
+
+**Group Invite Policy Change (Jan 28):**
+- **OLD:** Only admin (creator) can invite members
+- **NEW:** ANY member can invite, only admin can kick
+- **Rationale:** More social/organic growth, reduces friction, matches casual group chat UX (WhatsApp/Telegram)
+- **Security:** Token gating still enforced on-chain in accept_group_invite, 30 member cap prevents spam
+- **Program Change:** `invite_to_group` now checks `group.members.contains()` instead of `group.creator ==`
+- **UI Change:** GroupInfoScreen shows "Invite Members" to all members (checks `isMember` not `isAdmin`)
+- **Files:** `programs/mukon-messenger/src/lib.rs` (line 456-462), `app/src/screens/GroupInfoScreen.tsx`
+
 **Remaining Known Issues:**
-1. **Group creators can't see their groups** - loadGroups() only queries GroupInvite accounts, but creators are added directly to Group.members (identified Jan 28)
-2. **Group creation requires multiple transactions** - Current: create_group (1 tx) + invite per member (N txs), desired: single batched transaction (identified Jan 28)
-3. **Wallet connection persistence** - Closing/reopening app requires full reconnect
-4. **Backend message persistence** - Currently in-memory only, need SQLite/Redis
-5. **Domain resolution verification** - Code implemented but needs testing on mainnet with real domains
-6. **Group key rotation** - Currently only rotates on kick, should rotate on all member changes (security debt)
+1. **Program needs rebuild/redeploy** - invite_to_group logic changed, requires `anchor build && anchor deploy` (Jan 28)
+2. **Group creators can't see their groups** - loadGroups() only queries GroupInvite accounts, but creators are added directly to Group.members (identified Jan 28)
+3. **Group creation requires multiple transactions** - Current: create_group (1 tx) + invite per member (N txs), desired: single batched transaction (identified Jan 28)
+4. **Wallet connection persistence** - Closing/reopening app requires full reconnect
+5. **Backend message persistence** - Currently in-memory only, need SQLite/Redis
+6. **Domain resolution verification** - Code implemented but needs testing on mainnet with real domains
+7. **Group key rotation** - Currently only rotates on kick, should rotate on all member changes (security debt)
 
 **Next Steps:**
 1. ✅ ~~Test messaging between wallets~~ - WORKING!
@@ -286,13 +326,19 @@ adb install -r app-debug.apk
 11. ✅ ~~Add reaction toggle behavior~~ - COMPLETE!
 12. ✅ ~~GROUP CHAT ARCHITECTURE~~ - Design complete (see section below)
 13. ✅ ~~GROUP CHAT IMPLEMENTATION~~ - All 7 instructions deployed, UI screens built, backend ready (Jan 26)
-14. 🔄 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty) - **CURRENT PRIORITY**
-15. 🔜 Test group chat E2E (create, invite, message, token gating)
-16. 🔜 Test domain resolution on mainnet with real .sol/.skr domains
-17. 🔜 Add wallet connection persistence (AsyncStorage)
-18. 🔜 Add backend message persistence (SQLite or Redis)
-19. 🔜 Polish UI/UX (loading states, error messages)
-20. 🔜 Deploy backend to Fly.io for production
+14. ✅ ~~Fix profile update bugs~~ - COMPLETE (Jan 28)
+15. ✅ ~~Fix DM decryption (avatar_type byte)~~ - COMPLETE (Jan 28)
+16. ✅ ~~Fix group key distribution~~ - COMPLETE (Jan 28)
+17. ✅ ~~Allow members to invite (not just admin)~~ - COMPLETE (Jan 28)
+18. 🔄 **Rebuild/redeploy program** - Need to deploy invite_to_group change
+19. 🔄 **Test all fixes end-to-end** - Profile, DMs, Groups (Jan 29)
+20. 🔄 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty) - **NEXT PRIORITY**
+21. 🔜 Test group chat E2E (create, invite, message, token gating)
+22. 🔜 Test domain resolution on mainnet with real .sol/.skr domains
+23. 🔜 Add wallet connection persistence (AsyncStorage)
+24. 🔜 Add backend message persistence (SQLite or Redis)
+25. 🔜 Polish UI/UX (loading states, error messages)
+26. 🔜 Deploy backend to Fly.io for production
 
 ## What We're Building
 
