@@ -363,60 +363,62 @@ export default function ChatScreen({ route, navigation }: any) {
               setQuickReactVisible(null);
             }}
             anchor={
-              <TouchableOpacity
-                onPress={() => {
-                  // Short press - show ONLY emoji chip
-                  setQuickReactVisible(item.id);
-                  setMenuVisible(null);
-                }}
-                onLongPress={() => {
-                  // Long press - show ONLY menu
-                  setMenuVisible(item.id);
-                  setQuickReactVisible(null);
-                }}
-                style={[
-                  styles.messageBubble,
-                  item.isMe ? styles.myMessage : styles.theirMessage,
-                ]}
-              >
-                {/* Replied message preview */}
-                {item.repliedToContent && (
-                  <View style={styles.repliedMessage}>
-                    <View style={styles.replyBar} />
-                    <Text style={styles.repliedText} numberOfLines={2}>
-                      {item.repliedToContent}
-                    </Text>
-                  </View>
-                )}
+              <View>
+                <TouchableOpacity
+                  onPress={() => {
+                    // Short press - show ONLY emoji chip
+                    setQuickReactVisible(item.id);
+                    setMenuVisible(null);
+                  }}
+                  onLongPress={() => {
+                    // Long press - show ONLY menu
+                    setMenuVisible(item.id);
+                    setQuickReactVisible(null);
+                  }}
+                  style={[
+                    styles.messageBubble,
+                    item.isMe ? styles.myMessage : styles.theirMessage,
+                  ]}
+                >
+                  {/* Replied message preview */}
+                  {item.repliedToContent && (
+                    <View style={styles.repliedMessage}>
+                      <View style={styles.replyBar} />
+                      <Text style={styles.repliedText} numberOfLines={2}>
+                        {item.repliedToContent}
+                      </Text>
+                    </View>
+                  )}
 
-                <Text style={styles.messageText}>{item.content}</Text>
+                  <Text style={styles.messageText}>{item.content}</Text>
 
-                <Text style={styles.messageTime}>
-                  {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-              </TouchableOpacity>
+                  <Text style={styles.messageTime}>
+                    {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </TouchableOpacity>
 
-              {/* Reactions display - BELOW the message bubble */}
-              {(() => {
-                const hasReactions = item.reactions && Object.keys(item.reactions).length > 0;
-                if (hasReactions) {
-                  console.log(`Message ${item.id} has reactions:`, item.reactions);
-                }
-                return hasReactions ? (
-                  <View style={styles.reactionsContainer}>
-                    {Object.entries(item.reactions).map(([emoji, users]: [string, any]) => (
-                      users && users.length > 0 ? (
-                        <View key={emoji} style={styles.reactionBubble}>
-                          <Text style={styles.reactionEmoji}>{emoji}</Text>
-                          {users.length > 1 && (
-                            <Text style={styles.reactionCount}>{users.length}</Text>
-                          )}
-                        </View>
-                      ) : null
-                    ))}
-                  </View>
-                ) : null;
-              })()}
+                {/* Reactions display - BELOW the message bubble */}
+                {(() => {
+                  const hasReactions = item.reactions && Object.keys(item.reactions).length > 0;
+                  if (hasReactions) {
+                    console.log(`Message ${item.id} has reactions:`, item.reactions);
+                  }
+                  return hasReactions ? (
+                    <View style={styles.reactionsContainer}>
+                      {Object.entries(item.reactions).map(([emoji, users]: [string, any]) => (
+                        users && users.length > 0 ? (
+                          <View key={emoji} style={styles.reactionBubble}>
+                            <Text style={styles.reactionEmoji}>{emoji}</Text>
+                            {users.length > 1 && (
+                              <Text style={styles.reactionCount}>{users.length}</Text>
+                            )}
+                          </View>
+                        ) : null
+                      ))}
+                    </View>
+                  ) : null;
+                })()}
+              </View>
             }
           >
             <Menu.Item
