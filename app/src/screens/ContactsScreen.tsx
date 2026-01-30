@@ -9,7 +9,7 @@ import { truncateAddress, getChatHash } from '../utils/encryption';
 import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
 import { useContactNames } from '../hooks/useContactNames';
-import { setContactCustomName, getContactCustomName, getCachedDomain } from '../utils/domains';
+import { setContactCustomName, getContactCustomName, getCachedDomain, getGroupAvatar } from '../utils/domains';
 
 type FilterType = 'All' | 'DMs' | 'Groups' | 'Unread';
 
@@ -25,13 +25,28 @@ export default function ContactsScreen({ navigation }: any) {
   const [newName, setNewName] = React.useState('');
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [filter, setFilter] = React.useState<FilterType>('All');
+  const [groupAvatars, setGroupAvatars] = React.useState<Map<string, string>>(new Map());
   const displayNames = useContactNames(messenger.contacts);
 
-  // Refresh display names when screen comes into focus (after editing in ChatScreen)
+  // Refresh display names and load group avatars when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       setRefreshKey(prev => prev + 1);
-    }, [])
+
+      // Load all group avatars
+      const loadGroupAvatars = async () => {
+        const avatars = new Map<string, string>();
+        for (const group of messenger.groups) {
+          const groupIdHex = Buffer.from(group.groupId).toString('hex');
+          const avatar = await getGroupAvatar(groupIdHex);
+          if (avatar) {
+            avatars.set(groupIdHex, avatar);
+          }
+        }
+        setGroupAvatars(avatars);
+      };
+      loadGroupAvatars();
+    }, [messenger.groups])
   );
 
   // Register user if not already registered
@@ -158,14 +173,21 @@ export default function ContactsScreen({ navigation }: any) {
               <List.Item
                 title={item.displayName}
                 description={item.lastMessage || `${group.members.length} members`}
-                left={(props) => (
-                  <Avatar.Icon
-                    {...props}
-                    size={48}
-                    icon="account-group"
-                    style={{ backgroundColor: theme.colors.secondary }}
-                  />
-                )}
+                left={(props) => {
+                  const avatar = groupAvatars.get(item.id);
+                  return avatar ? (
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 32 }}>{avatar}</Text>
+                    </View>
+                  ) : (
+                    <Avatar.Icon
+                      {...props}
+                      size={48}
+                      icon="account-group"
+                      style={{ backgroundColor: theme.colors.secondary }}
+                    />
+                  );
+                }}
                 right={(props) => (
                   <View style={styles.rightContainer}>
                     {item.timestamp && <Text style={styles.timestamp}>{item.timestamp}</Text>}

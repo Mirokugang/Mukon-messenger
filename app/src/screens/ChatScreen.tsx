@@ -10,6 +10,7 @@ import { useMessenger } from '../contexts/MessengerContext';
 import { getChatHash } from '../utils/encryption';
 import { getContactCustomName, getCachedDomain, setContactCustomName } from '../utils/domains';
 import ReactionPicker from '../components/ReactionPicker';
+import ChatBackground from '../components/ChatBackground';
 
 export default function ChatScreen({ route, navigation }: any) {
   const { contact } = route.params;
@@ -181,13 +182,17 @@ export default function ChatScreen({ route, navigation }: any) {
   };
 
   React.useLayoutEffect(() => {
-    const showAvatar = contact.avatar && Array.from(contact.avatar).length === 1;
-
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitle}>
-          {showAvatar && (
+          {contact.avatar && Array.from(contact.avatar).length === 1 ? (
             <Text style={styles.headerAvatar}>{contact.avatar}</Text>
+          ) : (
+            <View style={styles.headerAvatarFallback}>
+              <Text style={styles.headerAvatarFallbackText}>
+                {(displayName || contact.pubkey || '?')[0].toUpperCase()}
+              </Text>
+            </View>
           )}
           <Text style={styles.headerName}>
             {displayName}
@@ -322,15 +327,21 @@ export default function ChatScreen({ route, navigation }: any) {
     }
 
     // Regular encrypted messages with avatar for incoming messages
-    // Check if avatar is a single emoji (emojis can be 2+ chars in JS due to UTF-16)
-    const showAvatar = !item.isMe && contact.avatar && Array.from(contact.avatar).length === 1;
+    // Always show avatar for incoming messages
+    const showAvatar = !item.isMe;
 
     return (
       <View style={[styles.messageRow, item.isMe ? styles.myMessageRow : styles.theirMessageRow]}>
         {/* Avatar for incoming messages only */}
         {showAvatar && (
           <View style={styles.messageAvatar}>
-            <Text style={styles.messageAvatarEmoji}>{contact.avatar}</Text>
+            {contact.avatar && Array.from(contact.avatar).length === 1 ? (
+              <Text style={styles.messageAvatarEmoji}>{contact.avatar}</Text>
+            ) : (
+              <Text style={styles.messageAvatarFallback}>
+                {(displayName || contact.pubkey || '?')[0].toUpperCase()}
+              </Text>
+            )}
           </View>
         )}
 
@@ -493,6 +504,7 @@ export default function ChatScreen({ route, navigation }: any) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
+      <ChatBackground />
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -602,6 +614,19 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: theme.colors.textPrimary,
   },
+  headerAvatarFallback: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerAvatarFallbackText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.onPrimary,
+  },
   messagesList: {
     padding: 16,
     flexGrow: 1,
@@ -633,6 +658,11 @@ const styles = StyleSheet.create({
   },
   messageAvatarEmoji: {
     fontSize: 20,
+  },
+  messageAvatarFallback: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
   },
   messageBubble: {
     maxWidth: '100%',

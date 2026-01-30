@@ -215,3 +215,16 @@ export async function getCachedDomain(
   const key = `${DOMAIN_CACHE_PREFIX}${publicKey.toBase58()}`;
   return await AsyncStorage.getItem(key);
 }
+
+/**
+ * Store group avatar (emoji) locally in AsyncStorage
+ */
+const GROUP_AVATAR_PREFIX = '@mukon_group_avatar_';
+
+export async function setGroupAvatar(groupId: string, emoji: string): Promise<void> {
+  await AsyncStorage.setItem(`${GROUP_AVATAR_PREFIX}${groupId}`, emoji.trim());
+}
+
+export async function getGroupAvatar(groupId: string): Promise<string | null> {
+  return await AsyncStorage.getItem(`${GROUP_AVATAR_PREFIX}${groupId}`);
+}

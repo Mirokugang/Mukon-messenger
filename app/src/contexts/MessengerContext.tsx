@@ -84,6 +84,7 @@ interface MessengerContextType {
   groups: Group[];
   groupInvites: GroupInvite[];
   groupMessages: Map<string, any[]>;
+  groupKeys: Map<string, Uint8Array>;
   createGroup: (name: string, tokenGate?: TokenGate) => Promise<{ groupId: Uint8Array; txSignature: string }>;
   createGroupWithMembers: (name: string, invitees: PublicKey[], tokenGate?: TokenGate) => Promise<{ groupId: Uint8Array; txSignature: string }>;
   updateGroup: (groupId: Uint8Array, name?: string, tokenGate?: TokenGate) => Promise<string>;
@@ -1676,6 +1677,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     groups,
     groupInvites,
     groupMessages,
+    groupKeys,
     createGroup,
     createGroupWithMembers,
     updateGroup,

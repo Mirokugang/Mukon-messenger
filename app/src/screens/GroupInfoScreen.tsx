@@ -1,20 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { List, Button, Text, Divider, Avatar } from 'react-native-paper';
+import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import { List, Button, Text, Divider, Avatar, Dialog, Portal, TextInput, IconButton } from 'react-native-paper';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { useMessenger } from '../contexts/MessengerContext';
 import { PublicKey } from '@solana/web3.js';
+import { Buffer } from 'buffer';
+import { theme } from '../theme';
+import EmojiPicker from '../components/EmojiPicker';
+import { getGroupAvatar, setGroupAvatar } from '../utils/domains';
 
 export default function GroupInfoScreen() {
   const route = useRoute();
   const navigation = useNavigation();
   const { groupId, groupName: routeGroupName } = route.params as { groupId: string; groupName?: string };
 
-  const { groups, leaveGroup, kickMember, wallet, loading } = useMessenger();
+  const { groups, leaveGroup, kickMember, updateGroup, wallet, loading } = useMessenger();
 
   const [group, setGroup] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isMember, setIsMember] = useState(false);
+  const [renameDialogVisible, setRenameDialogVisible] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
+  const [groupAvatar, setGroupAvatarState] = useState<string | null>(null);
 
   useEffect(() => {
     // Find group in loaded groups
@@ -25,6 +33,13 @@ export default function GroupInfoScreen() {
       setIsAdmin(foundGroup.creator.equals(wallet.publicKey));
       setIsMember(foundGroup.members.some((m: PublicKey) => m.equals(wallet.publicKey)));
     }
+
+    // Load group avatar
+    const loadAvatar = async () => {
+      const avatar = await getGroupAvatar(groupId);
+      setGroupAvatarState(avatar);
+    };
+    loadAvatar();
   }, [groups, groupId, wallet]);
 
   // Use route groupName or fall back to group.name or default
@@ -79,6 +94,32 @@ export default function GroupInfoScreen() {
     );
   };
 
+  const handleRename = async () => {
+    if (!newGroupName.trim()) return;
+
+    try {
+      const groupIdBytes = new Uint8Array(Buffer.from(groupId, 'hex'));
+      await updateGroup(groupIdBytes, newGroupName.trim());
+      setRenameDialogVisible(false);
+      setNewGroupName('');
+
+      // Update route params so header shows new name
+      navigation.setParams({ groupName: newGroupName.trim() } as never);
+    } catch (error: any) {
+      Alert.alert('Error', `Failed to rename group: ${error.message}`);
+    }
+  };
+
+  const handleEmojiSelect = async (emoji: string) => {
+    try {
+      await setGroupAvatar(groupId, emoji);
+      setGroupAvatarState(emoji);
+      setEmojiPickerVisible(false);
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to set group avatar');
+    }
+  };
+
   if (!group) {
     return (
       <View style={styles.container}>
@@ -90,10 +131,37 @@ export default function GroupInfoScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Avatar.Text size={80} label={(displayName || 'GR').slice(0, 2).toUpperCase()} />
-        <Text variant="headlineSmall" style={styles.groupName}>
-          {displayName}
-        </Text>
+        <TouchableOpacity
+          onPress={() => isAdmin && setEmojiPickerVisible(true)}
+          disabled={!isAdmin}
+        >
+          {groupAvatar ? (
+            <View style={styles.avatarContainer}>
+              <Text style={styles.avatarEmoji}>{groupAvatar}</Text>
+            </View>
+          ) : (
+            <Avatar.Text size={80} label={(displayName || 'GR').slice(0, 2).toUpperCase()} />
+          )}
+          {isAdmin && (
+            <Text style={styles.avatarHint}>Tap to change</Text>
+          )}
+        </TouchableOpacity>
+        <View style={styles.nameRow}>
+          <Text variant="headlineSmall" style={styles.groupName}>
+            {displayName}
+          </Text>
+          {isAdmin && (
+            <IconButton
+              icon="pencil"
+              size={20}
+              iconColor={theme.colors.textSecondary}
+              onPress={() => {
+                setNewGroupName(displayName);
+                setRenameDialogVisible(true);
+              }}
+            />
+          )}
+        </View>
         <Text variant="bodyMedium" style={styles.memberCount}>
           {group.members.length} members
         </Text>
@@ -192,6 +260,47 @@ export default function GroupInfoScreen() {
           </Button>
         )}
       </View>
+
+      {/* Rename Group Dialog */}
+      <Portal>
+        <Dialog visible={renameDialogVisible} onDismiss={() => setRenameDialogVisible(false)}>
+          <Dialog.Title>Rename Group</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
+              Current: {displayName}
+            </Text>
+            <TextInput
+              label="New Group Name"
+              value={newGroupName}
+              onChangeText={setNewGroupName}
+              mode="outlined"
+              placeholder="Enter new group name"
+              style={{ backgroundColor: theme.colors.surface }}
+              outlineColor={theme.colors.surface}
+              activeOutlineColor={theme.colors.primary}
+              autoFocus
+            />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setRenameDialogVisible(false)}>Cancel</Button>
+            <Button
+              onPress={handleRename}
+              mode="contained"
+              buttonColor={theme.colors.primary}
+              disabled={!newGroupName.trim()}
+            >
+              Save
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      {/* Emoji Picker */}
+      <EmojiPicker
+        visible={emojiPickerVisible}
+        onDismiss={() => setEmojiPickerVisible(false)}
+        onSelect={handleEmojiSelect}
+      />
     </ScrollView>
   );
 }
@@ -210,9 +319,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
   },
+  avatarContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: theme.colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarEmoji: {
+    fontSize: 48,
+  },
+  avatarHint: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+  },
   groupName: {
     color: '#ffffff',
-    marginTop: 16,
   },
   memberCount: {
     color: '#888',
