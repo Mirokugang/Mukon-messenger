@@ -97,7 +97,7 @@ adb install -r app-debug.apk
 
 ---
 
-## Current Status (as of 2026-01-29)
+## Current Status (as of 2026-01-31)
 
 **Deployed:**
 - Solana program: `GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj` (devnet)
@@ -125,6 +125,7 @@ adb install -r app-debug.apk
 **Profile & Contacts:**
 - ✅ Emoji avatars (200+ curated emojis)
 - ✅ Avatar display in chat, header, drawer, contacts
+- ✅ DM always-show avatar with first-letter fallback
 - ✅ Always-editable username
 - ✅ .sol/.skr domain resolution (SNS)
 - ✅ Custom contact names (local AsyncStorage)
@@ -138,26 +139,32 @@ adb install -r app-debug.apk
 - ✅ Group encryption (NaCl secretbox)
 - ✅ Unified conversations (DMs + Groups)
 - ✅ Group key distribution (request if offline)
+- ✅ Group rename (admin only, on-chain via updateGroup)
+- ✅ Group emoji avatars (local AsyncStorage, shown in info/header/list)
 
 **UI/UX:**
 - ✅ Telegram-style drawer navigation
 - ✅ Settings screen
 - ✅ Three-tier build system (build / clean / prebuild)
+- ✅ SVG crypto wallpaper (wallet, key, shield, chain, coin, hex, Solana swoosh)
+- ✅ react-native-svg installed (requires native rebuild via build:prebuild)
 
 **Known Issues:**
 1. **Wallet persistence** - Closing app requires full reconnect
-2. **Backend persistence** - Currently in-memory, needs SQLite/Redis
+2. **Backend persistence** - Currently in-memory, needs database (Fly.io Postgres)
 3. **Domain resolution** - Needs mainnet testing with real .sol/.skr domains
 4. **Group key rotation** - Only rotates on kick (security debt)
 5. **Group creator visibility** - loadGroups() only queries GroupInvite, doesn't show groups you created
+6. **Native rebuild required** - react-native-svg requires `build:prebuild` for wallpaper to render
 
 **Next Steps:**
-1. 🔄 Test all fixes E2E (profile, DMs, groups)
-2. 🔄 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty) - **NEXT PRIORITY**
-3. 🔜 Deploy backend to Fly.io
-4. 🔜 Add wallet connection persistence
-5. 🔜 Add backend message persistence
-6. 🔜 Polish UI/UX (loading states, errors)
+1. 🔄 Test all features E2E (rebuild needed - react-native-svg requires native build)
+2. 🔄 UI polish pass (loading states, error handling, placeholder screens for future features)
+3. 🔄 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty) - **TOP PRIORITY**
+4. 🔜 Deploy backend to Fly.io (WebSocket + Postgres persistence)
+5. 🔜 Demo video prep - "coming soon" placeholder screens for unimplemented features
+6. 🔜 Add wallet connection persistence
+7. 🔜 Mainnet deployment (program + backend)
 
 **Detailed fix history:** See CHANGELOG.md
 
@@ -468,9 +475,9 @@ The `invite` instruction uses `init_if_needed` on `invitee_descriptor`:
 - 📝 See PRODUCTION_DEPLOY.md
 
 **Deployment Timeline:**
-1. Week 1 (Jan 20-23): MVP + Arcium integration
-2. Week 2 (Jan 24-30): Deploy to Fly.io + mainnet, submit hackathon
-3. Week 3+: Add persistence, monitoring, launch on Solana Mobile
+1. ✅ Week 1 (Jan 20-26): Core messenger MVP (DMs, groups, encryption)
+2. 🔄 Week 2 (Jan 27-30): Arcium integration, UI polish, deploy to Fly.io/mainnet, submit hackathon
+3. 🔜 Week 3+ (Feb): Add persistence, monitoring, launch on Solana Mobile dApp Store
 
 **Before mainnet:**
 - [ ] Deploy backend to Fly.io
