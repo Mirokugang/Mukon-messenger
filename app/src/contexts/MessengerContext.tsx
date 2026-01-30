@@ -36,7 +36,7 @@ import {
 } from '../utils/transactions';
 import { deriveEncryptionKeypair, getChatHash } from '../utils/encryption';
 import type { WalletContextType } from './WalletContext';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, SOLANA_RPC_URL } from '../config';
 
 export interface Contact {
   publicKey: PublicKey;
@@ -140,14 +140,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   const groupKeysRef = useRef<Map<string, Uint8Array>>(new Map());
 
   const connection = useMemo(
-    () =>
-      new Connection(
-        cluster === 'devnet'
-          ? 'https://api.devnet.solana.com'
-          : 'http://localhost:8899',
-        'confirmed'
-      ),
-    [cluster]
+    () => new Connection(SOLANA_RPC_URL, 'confirmed'),
+    []
   );
 
   // Keep refs in sync with state (Fix 2b, 2d)
