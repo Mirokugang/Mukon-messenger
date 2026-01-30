@@ -4,6 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import nacl from 'tweetnacl';
 import { Buffer } from 'buffer';
 import bs58 from 'bs58';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getUserProfilePDA,
   getWalletDescriptorPDA,
@@ -133,6 +134,11 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   const [groupKeys, setGroupKeys] = useState<Map<string, Uint8Array>>(new Map()); // groupId -> symmetric key
   const [activeGroupRoom, setActiveGroupRoom] = useState<string | null>(null);
 
+  // Refs for socket handlers to avoid stale closures (Fix 2b, 2d)
+  const encryptionKeysRef = useRef<nacl.BoxKeyPair | null>(null);
+  const contactsRef = useRef<Contact[]>([]);
+  const groupKeysRef = useRef<Map<string, Uint8Array>>(new Map());
+
   const connection = useMemo(
     () =>
       new Connection(
@@ -143,6 +149,67 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       ),
     [cluster]
   );
+
+  // Keep refs in sync with state (Fix 2b, 2d)
+  useEffect(() => {
+    encryptionKeysRef.current = encryptionKeys;
+  }, [encryptionKeys]);
+
+  useEffect(() => {
+    contactsRef.current = contacts;
+  }, [contacts]);
+
+  useEffect(() => {
+    groupKeysRef.current = groupKeys;
+  }, [groupKeys]);
+
+  // Persist group keys to AsyncStorage (Fix 2e)
+  useEffect(() => {
+    if (!wallet?.publicKey) return;
+
+    const persistGroupKeys = async () => {
+      try {
+        const keysArray = Array.from(groupKeys.entries()).map(([groupId, key]) => ({
+          groupId,
+          key: Buffer.from(key).toString('base64'),
+        }));
+        await AsyncStorage.setItem(
+          `groupKeys_${wallet.publicKey.toBase58()}`,
+          JSON.stringify(keysArray)
+        );
+      } catch (error) {
+        console.error('Failed to persist group keys:', error);
+      }
+    };
+
+    persistGroupKeys();
+  }, [groupKeys, wallet?.publicKey]);
+
+  // Load persisted group keys on mount (Fix 2e)
+  useEffect(() => {
+    if (!wallet?.publicKey) return;
+
+    const loadPersistedGroupKeys = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(`groupKeys_${wallet.publicKey.toBase58()}`);
+        if (stored) {
+          const keysArray = JSON.parse(stored);
+          const keysMap = new Map(
+            keysArray.map((item: any) => [
+              item.groupId,
+              new Uint8Array(Buffer.from(item.key, 'base64')),
+            ])
+          );
+          setGroupKeys(keysMap);
+          console.log(`✅ Loaded ${keysMap.size} persisted group keys`);
+        }
+      } catch (error) {
+        console.error('Failed to load persisted group keys:', error);
+      }
+    };
+
+    loadPersistedGroupKeys();
+  }, [wallet?.publicKey]);
 
   // Derive encryption keys from signature obtained during wallet connect
   useEffect(() => {
@@ -336,22 +403,54 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       console.log('🚫 Member kicked from group:', groupId, memberPubkey);
     });
 
-    newSocket.on('group_key_shared', ({ groupId, senderPubkey, encryptedKey, nonce }) => {
+    newSocket.on('group_key_shared', async ({ groupId, senderPubkey, encryptedKey, nonce }) => {
       console.log('🔑 Received group key share from:', senderPubkey);
 
-      // Decrypt group key with our encryption keys
-      if (encryptionKeys) {
+      // Use refs to avoid stale closure (Fix 2b)
+      const currentEncryptionKeys = encryptionKeysRef.current;
+      const currentContacts = contactsRef.current;
+
+      if (currentEncryptionKeys) {
         try {
-          const sender = contacts.find(c => c.publicKey.toBase58() === senderPubkey);
-          if (sender?.encryptionPublicKey) {
+          // Try to find sender in contacts first
+          let senderEncryptionPubkey = currentContacts.find(
+            c => c.publicKey.toBase58() === senderPubkey
+          )?.encryptionPublicKey;
+
+          // If not found in contacts, fetch from on-chain (Fix 2c)
+          if (!senderEncryptionPubkey) {
+            console.log('⚠️ Sender not in contacts, fetching from on-chain...');
+            try {
+              const senderPubkeyObj = new PublicKey(senderPubkey);
+              const senderProfilePDA = getUserProfilePDA(senderPubkeyObj);
+              const senderAccountInfo = await connection.getAccountInfo(senderProfilePDA);
+
+              if (senderAccountInfo) {
+                const data = senderAccountInfo.data;
+                let offset = 8 + 32; // Skip discriminator + owner
+                const displayNameLength = data.readUInt32LE(offset);
+                offset += 4 + displayNameLength;
+                const avatarType = data.readUInt8(offset);
+                offset += 1;
+                const avatarUrlLength = data.readUInt32LE(offset);
+                offset += 4 + avatarUrlLength;
+                senderEncryptionPubkey = data.slice(offset, offset + 32);
+                console.log('✅ Fetched sender encryption key from on-chain');
+              }
+            } catch (fetchError) {
+              console.error('❌ Failed to fetch sender profile:', fetchError);
+            }
+          }
+
+          if (senderEncryptionPubkey) {
             const encryptedBytes = Buffer.from(encryptedKey, 'base64');
             const nonceBytes = Buffer.from(nonce, 'base64');
 
             const decryptedKey = nacl.box.open(
               encryptedBytes,
               nonceBytes,
-              sender.encryptionPublicKey,
-              encryptionKeys.secretKey
+              senderEncryptionPubkey,
+              currentEncryptionKeys.secretKey
             );
 
             if (decryptedKey) {
@@ -361,7 +460,11 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
                 return updated;
               });
               console.log('✅ Group key decrypted and stored');
+            } else {
+              console.error('❌ Failed to decrypt group key (decryption returned null)');
             }
+          } else {
+            console.error('❌ Could not find sender encryption public key');
           }
         } catch (error) {
           console.error('❌ Failed to decrypt group key:', error);
@@ -1084,9 +1187,9 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       const txSignature = await connection.sendTransaction(signedTransaction);
       await connection.confirmTransaction(txSignature, 'confirmed');
 
-      // Share group key with invitee via Socket.IO
+      // Share group key with invitee via Socket.IO (Fix 2d: use ref to avoid stale closure)
       const groupIdHex = Buffer.from(groupId).toString('hex');
-      const groupSecret = groupKeys.get(groupIdHex);
+      const groupSecret = groupKeysRef.current.get(groupIdHex);
 
       if (groupSecret && socket) {
         const inviteeContact = contacts.find(c => c.publicKey.equals(inviteePubkey));
@@ -1403,14 +1506,11 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         }
       }
 
-      // Query 2: Find groups where user is the creator
+      // Query 2: Find groups where user is the creator (Fix 2a: removed dataSize filter)
       // Creators are added directly to Group.members but don't have GroupInvite accounts
+      // NOTE: Removed dataSize filter because Group accounts realloc on member changes
       const creatorGroups = await connection.getProgramAccounts(PROGRAM_ID, {
         filters: [
-          {
-            // Group account size: 8 + 32 + 32 + (4+64) + 8 + (4+30*32) + 32 + (1+32+8)
-            dataSize: 8 + 32 + 32 + (4 + 64) + 8 + (4 + 30 * 32) + 32 + (1 + 32 + 8),
-          },
           {
             // Filter for accounts where creator = wallet.publicKey (offset 8 + 32 = 40)
             memcmp: {
@@ -1537,7 +1637,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
   const joinGroupRoom = (groupId: string) => {
     if (socket) {
-      socket.emit('join_group', { groupId });
+      // Fix 2f: Use separate event for viewing vs joining as member
+      socket.emit('join_group_room', { groupId });
       setActiveGroupRoom(groupId);
       console.log('Joining group room:', groupId);
     }

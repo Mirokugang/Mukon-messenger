@@ -296,7 +296,8 @@ io.on('connection', (socket) => {
 
   // ========== GROUP EVENT HANDLERS ==========
 
-  socket.on('join_group', ({ groupId, memberPubkey }) => {
+  // Fix 2f: Separate event for viewing a group (joining the room)
+  socket.on('join_group_room', ({ groupId }) => {
     socket.join(`group_${groupId}`);
 
     if (!groupRooms.has(groupId)) {
@@ -306,12 +307,15 @@ io.on('connection', (socket) => {
 
     const room = io.sockets.adapter.rooms.get(`group_${groupId}`);
     const roomSize = room ? room.size : 0;
-    console.log(`${memberPubkey || socket.publicKey || socket.id} joined group: ${groupId.slice(0, 8)}... (now ${roomSize} clients in room)`);
+    console.log(`${socket.publicKey || socket.id} joined group room: ${groupId.slice(0, 8)}... (now ${roomSize} clients in room)`);
+  });
+
+  // Membership notification (when someone accepts invite)
+  socket.on('join_group', ({ groupId, memberPubkey }) => {
+    console.log(`${memberPubkey} joined group as member: ${groupId.slice(0, 8)}...`);
 
     // Broadcast member joined event
-    if (memberPubkey) {
-      io.to(`group_${groupId}`).emit('group_member_joined', { groupId, memberPubkey });
-    }
+    io.to(`group_${groupId}`).emit('group_member_joined', { groupId, memberPubkey });
   });
 
   socket.on('leave_group_room', ({ groupId }) => {
@@ -492,6 +496,24 @@ io.on('connection', (socket) => {
       io.to(`group_${groupId}`).emit('group_message_deleted', { groupId, messageId });
       console.log(`Message ${messageId} deleted for everyone in group ${groupId.slice(0, 8)}...`);
     }
+  });
+
+  // Fix 2g: Handle group deletion
+  socket.on('group_deleted', ({ groupId }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    console.log(`🗑️  Group ${groupId.slice(0, 8)}... deleted by creator`);
+
+    // Clean up group data
+    groupMessages.delete(groupId);
+    groupRooms.delete(groupId);
+    pendingKeyShares.delete(groupId);
+
+    // Notify all members
+    io.to(`group_${groupId}`).emit('group_deleted', { groupId });
   });
 
   socket.on('disconnect', () => {
