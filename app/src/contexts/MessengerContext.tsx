@@ -35,9 +35,7 @@ import {
 } from '../utils/transactions';
 import { deriveEncryptionKeypair, getChatHash } from '../utils/encryption';
 import type { WalletContextType } from './WalletContext';
-
-// Backend URL - use actual host IP for physical device
-const BACKEND_URL = 'http://192.168.68.57:3001';
+import { BACKEND_URL } from '../config';
 
 export interface Contact {
   publicKey: PublicKey;
