@@ -97,11 +97,23 @@ adb install -r app-debug.apk
 
 ---
 
-## Current Status (as of 2026-01-31)
+## Current Status (as of 2026-01-31 EOD)
 
 **Deployed:**
 - Solana program: `GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj` (devnet)
 - Backend: Running on configurable host IP (see `app/src/config.ts`)
+
+**Recent Work (Jan 31):**
+- ✅ **Phase 2B**: Implemented 7 critical UI/UX fixes
+  - Fixed nickname reset instant refresh (refreshKey prop)
+  - Fixed message tick colors (single dim ✓ for sent, double bright ✓✓ for read)
+  - Fixed group avatar backend storage (setGroupAvatarShared)
+  - Fixed dark-themed popups (EmojiPicker, GroupInfoScreen confirmations)
+  - Added 10s delay to group key backup (prevents back-to-back wallet prompts)
+  - Improved ContactsListScreen (3 vertical buttons, wallet addresses shown)
+  - Fixed DM unread badge logic (eliminated triple-nested state setter antipattern)
+- 🔄 **Debugging**: Added comprehensive logging for unread counts, read receipts, group avatars
+- 📁 **Cleanup**: Moved internal docs to `.dev/` folder (CHANGELOG, ARCIUM_STATUS, STEP_A_TEST_CHECKLIST)
 
 **Working Features:**
 
@@ -150,22 +162,47 @@ adb install -r app-debug.apk
 - ✅ SVG crypto wallpaper (wallet, key, shield, chain, coin, hex, Solana swoosh)
 - ✅ react-native-svg installed (requires native rebuild via build:prebuild)
 
-**Known Issues:**
-1. **Wallet persistence** - Closing app requires full reconnect
-2. **Backend persistence** - Currently in-memory, needs database (Fly.io Postgres)
-3. **Domain resolution** - Needs mainnet testing with real .sol/.skr domains
-4. **Group key rotation** - Only rotates on kick (security debt)
-5. **Group creator visibility** - loadGroups() only queries GroupInvite, doesn't show groups you created
-6. **Native rebuild required** - react-native-svg requires `build:prebuild` for wallpaper to render
+**Known Issues (Actively Debugging):**
+1. 🐛 **Unread message badges not incrementing** - Logic implemented but not showing in production (debug logs added)
+2. 🐛 **Read ticks not showing** - Backend emits `messages_read` but sender may not receive if not in room (investigating)
+3. 🐛 **Group avatars not persisting** - Backend stores them but fetch logic timing issue (socket not ready when loadGroups runs)
+4. 🔧 **Double wallet signature on group creation** - Two transactions: (1) create+invite, (2) store key. Can combine into one.
 
-**Next Steps:**
-1. 🔄 Test all features E2E (rebuild needed - react-native-svg requires native build)
-2. 🔄 UI polish pass (loading states, error handling, placeholder screens for future features)
-3. 🔄 **ARCIUM INTEGRATION** - Encrypt contact lists + groups on-chain ($10k bounty) - **TOP PRIORITY**
-4. 🔜 Deploy backend to Fly.io (WebSocket + Postgres persistence)
-5. 🔜 Demo video prep - "coming soon" placeholder screens for unimplemented features
-6. 🔜 Add wallet connection persistence
-7. 🔜 Mainnet deployment (program + backend)
+**Known Issues (Lower Priority):**
+5. **Wallet persistence** - Closing app requires full reconnect
+6. **Backend persistence** - Currently in-memory, needs database (Fly.io Postgres)
+7. **Domain resolution** - Needs mainnet testing with real .sol/.skr domains
+8. **Group key rotation** - Only rotates on kick (security debt)
+9. **All Alert.alert popups still white** - Need to replace 87 Alert.alert calls with DarkAlert component (9 files)
+
+**Next Steps (Feb 1 - Hackathon Submission):**
+1. 🔥 **DEBUG & FIX CRITICAL BUGS** (Tomorrow AM)
+   - Test unread badges with 2 devices → check debug logs
+   - Test read ticks with 2 devices → verify messages_read events
+   - Test group avatars persistence → verify fetch after socket connects
+   - Fix double-sign on group creation (combine transactions)
+
+2. 🔥 **ARCIUM INTEGRATION** (Tomorrow PM) - **$10K BOUNTY**
+   - Encrypt contact lists (WalletDescriptor.peers)
+   - Encrypt group membership (Group.members)
+   - MPC proofs for relationship verification
+   - **MUST SHIP FOR HACKATHON**
+
+3. 🔜 **UI Polish** (If time permits)
+   - Replace 87 Alert.alert with dark DarkAlert component
+   - Loading states, error handling
+   - Placeholder screens for unimplemented features
+
+4. 🔜 **Deploy to Production** (Before Feb 1 submission)
+   - Backend to Fly.io (WebSocket + Postgres)
+   - Program to mainnet-beta
+   - Demo video recording
+
+5. 🔜 **Post-Hackathon**
+   - Wallet connection persistence
+   - Message persistence to database
+   - Group key rotation
+   - Mainnet domain resolution testing
 
 **Detailed fix history:** See CHANGELOG.md
 
@@ -412,6 +449,45 @@ The `invite` instruction uses `init_if_needed` on `invitee_descriptor`:
 - When invitee registers, they see pending invitations
 
 **Implementation:** `programs/mukon-messenger/src/lib.rs` lines 302-309
+
+---
+
+## Known UX Issue: Double Wallet Sign on Group Creation
+
+**Problem:** Creating a group requires **2 wallet signatures**:
+1. Create group + invite members (transaction 1)
+2. Store admin's encrypted group key on-chain (transaction 2)
+
+**Why it happens:** The `createGroupWithMembers` function in `MessengerContext.tsx` sends two separate transactions for safety, but this creates a poor UX.
+
+**Solution (Easy Fix):**
+Combine both into ONE transaction by adding `createStoreGroupKeyInstruction` to the initial instructions array:
+
+```typescript
+// Current (2 transactions):
+const instructions = [
+  createCreateGroupInstruction(...),
+  ...invitees.map(invitee => createInviteToGroupInstruction(...))
+];
+const transaction = await buildTransaction(connection, wallet.publicKey, instructions);
+// Sign #1 ^^
+
+// Later...
+const storeKeyIx = createStoreGroupKeyInstruction(...);
+const storeKeyTx = await buildTransaction(connection, wallet.publicKey, [storeKeyIx]);
+// Sign #2 ^^
+
+// FIXED (1 transaction):
+const instructions = [
+  createCreateGroupInstruction(...),
+  ...invitees.map(invitee => createInviteToGroupInstruction(...)),
+  createStoreGroupKeyInstruction(...)  // Add here!
+];
+const transaction = await buildTransaction(connection, wallet.publicKey, instructions);
+// Only 1 sign! ^^
+```
+
+**File:** `app/src/contexts/MessengerContext.tsx` around line 1384-1438
 
 ---
 
