@@ -40,6 +40,7 @@ export default function GroupChatScreen() {
     socket,
     connection,
     updateGroup,
+    readTimestamps,
   } = useMessenger();
 
   const [messageText, setMessageText] = useState('');
@@ -253,7 +254,7 @@ export default function GroupChatScreen() {
     const getMessageStatus = (msg: any): 'sending' | 'sent' | 'read' | null => {
       if (msg.sender !== wallet?.publicKey?.toBase58()) return null; // Only for outgoing messages
       if (msg.status === 'read') return 'read';
-      const readTs = messenger.readTimestamps.get(groupId);
+      const readTs = readTimestamps.get(groupId);
       if (readTs && new Date(msg.timestamp).getTime() <= readTs) return 'read';
       return msg.status || 'sent';
     };
