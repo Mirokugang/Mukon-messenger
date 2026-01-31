@@ -31,6 +31,24 @@ export default function ContactsScreen({ navigation }: any) {
   const [profileModalVisible, setProfileModalVisible] = React.useState(false);
   const displayNames = useContactNames(wallet.publicKey, messenger.contacts);
 
+  // Compute values for selected contact modal (must be before early returns)
+  const selectedContactOriginalName = React.useMemo(() => {
+    if (!selectedContactForProfile) return '';
+    const contact = messenger.contacts.find(c => c.publicKey.toBase58() === selectedContactForProfile.pubkey);
+    return contact?.displayName || selectedContactForProfile.pubkey;
+  }, [selectedContactForProfile, messenger.contacts]);
+
+  const selectedContactGroupsInCommon = React.useMemo(() => {
+    if (!selectedContactForProfile || !wallet.publicKey) return [];
+    return messenger.groups
+      .filter(g => g.members.some(m => m.toBase58() === selectedContactForProfile.pubkey))
+      .map(g => ({
+        groupId: Buffer.from(g.groupId).toString('hex'),
+        name: g.name,
+        avatar: messenger.groupAvatars.get(Buffer.from(g.groupId).toString('hex')),
+      }));
+  }, [messenger.groups, messenger.groupAvatars, selectedContactForProfile, wallet.publicKey]);
+
   // Refresh display names when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
@@ -579,24 +597,6 @@ export default function ContactsScreen({ navigation }: any) {
       Alert.alert('Error', 'Failed to reset name');
     }
   };
-
-  // Compute values for selected contact modal
-  const selectedContactOriginalName = React.useMemo(() => {
-    if (!selectedContactForProfile) return '';
-    const contact = messenger.contacts.find(c => c.publicKey.toBase58() === selectedContactForProfile.pubkey);
-    return contact?.displayName || selectedContactForProfile.pubkey;
-  }, [selectedContactForProfile, messenger.contacts]);
-
-  const selectedContactGroupsInCommon = React.useMemo(() => {
-    if (!selectedContactForProfile || !wallet.publicKey) return [];
-    return messenger.groups
-      .filter(g => g.members.some(m => m.toBase58() === selectedContactForProfile.pubkey))
-      .map(g => ({
-        groupId: Buffer.from(g.groupId).toString('hex'),
-        name: g.name,
-        avatar: messenger.groupAvatars.get(Buffer.from(g.groupId).toString('hex')),
-      }));
-  }, [messenger.groups, messenger.groupAvatars, selectedContactForProfile, wallet.publicKey]);
 
   return (
     <View style={styles.container}>
