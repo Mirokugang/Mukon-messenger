@@ -1169,18 +1169,35 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       const data = await response.json();
       console.log(`📜 Loaded ${data.messages.length} messages from backend`);
 
+      // Parse persisted read timestamps (Fix: persistent read ticks)
+      const persistedReadTimestamps = new Map<string, number>();
+      if (data.readTimestamps && Array.isArray(data.readTimestamps)) {
+        data.readTimestamps.forEach((entry: { pubkey: string; timestamp: number }) => {
+          persistedReadTimestamps.set(entry.pubkey, entry.timestamp);
+        });
+        console.log(`📗 Loaded ${data.readTimestamps.length} persisted read receipts for conversation`);
+      }
+
       setMessages((prev) => {
         const updated = new Map(prev);
         const backendMessages = data.messages;
-        // Preserve local status fields from existing messages
-        const existingMessages = prev.get(conversationId) || [];
-        const existingStatusMap = new Map(
-          existingMessages.filter(m => m.status).map(m => [m.id, m.status])
-        );
-        const merged = backendMessages.map(msg => ({
-          ...msg,
-          status: existingStatusMap.get(msg.id) || (msg.sender === wallet?.publicKey?.toBase58() ? 'sent' : undefined),
-        }));
+
+        // Apply read status based on persisted timestamps
+        const merged = backendMessages.map(msg => {
+          // For messages I sent
+          if (msg.sender === wallet?.publicKey?.toBase58()) {
+            // Check if other person read it based on persisted timestamp
+            const otherPersonTimestamp = Array.from(persistedReadTimestamps.entries())
+              .find(([pubkey]) => pubkey !== wallet?.publicKey?.toBase58())?.[1];
+
+            if (otherPersonTimestamp && msg.timestamp <= otherPersonTimestamp) {
+              return { ...msg, status: 'read' };
+            }
+            return { ...msg, status: 'sent' };
+          }
+          return msg;
+        });
+
         updated.set(conversationId, merged);
         return updated;
       });
@@ -2036,18 +2053,39 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       const data = await response.json();
       console.log(`📜 Loaded ${data.messages.length} group messages from backend`);
 
+      // Parse persisted read timestamps (Fix: persistent read ticks)
+      const persistedReadTimestamps = new Map<string, number>();
+      if (data.readTimestamps && Array.isArray(data.readTimestamps)) {
+        data.readTimestamps.forEach((entry: { pubkey: string; timestamp: number }) => {
+          persistedReadTimestamps.set(entry.pubkey, entry.timestamp);
+        });
+        console.log(`📗 Loaded ${data.readTimestamps.length} persisted read receipts for group`);
+      }
+
       setGroupMessages(prev => {
         const updated = new Map(prev);
         const backendMessages = data.messages;
-        // Preserve local status fields from existing messages
-        const existingMessages = prev.get(groupId) || [];
-        const existingStatusMap = new Map(
-          existingMessages.filter(m => m.status).map(m => [m.id, m.status])
-        );
-        const merged = backendMessages.map(msg => ({
-          ...msg,
-          status: existingStatusMap.get(msg.id) || (msg.sender === wallet?.publicKey?.toBase58() ? 'sent' : undefined),
-        }));
+
+        // Apply read status based on persisted timestamps
+        const merged = backendMessages.map(msg => {
+          // For messages I sent
+          if (msg.sender === wallet?.publicKey?.toBase58()) {
+            // Check if ANY other member read it (use max timestamp)
+            const maxReadTimestamp = Math.max(
+              0,
+              ...Array.from(persistedReadTimestamps.entries())
+                .filter(([pubkey]) => pubkey !== wallet?.publicKey?.toBase58())
+                .map(([_, timestamp]) => timestamp)
+            );
+
+            if (maxReadTimestamp > 0 && msg.timestamp <= maxReadTimestamp) {
+              return { ...msg, status: 'read' };
+            }
+            return { ...msg, status: 'sent' };
+          }
+          return msg;
+        });
+
         updated.set(groupId, merged);
         return updated;
       });

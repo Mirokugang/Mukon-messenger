@@ -30,6 +30,9 @@ const groupMessages = new Map(); // groupId -> Message[]
 const groupRooms = new Map(); // groupId -> Set<socket.id>
 const pendingKeyShares = new Map(); // groupId -> Map<recipientPubkey, { encryptedKey, nonce, senderPubkey }>
 const groupAvatars = new Map(); // groupId -> emoji string (Fix 4)
+// Read receipt persistence (Fix: persist read status across sessions)
+const readReceipts = new Map(); // conversationId -> Map<readerPubkey, latestTimestamp>
+const groupReadReceipts = new Map(); // groupId -> Map<readerPubkey, latestTimestamp>
 
 // Verify wallet signature
 function verifySignature(publicKey, message, signature) {
@@ -106,7 +109,18 @@ app.get('/messages/:conversationId', (req, res) => {
   }
 
   const conversationMessages = messages.get(conversationId) || [];
-  res.json({ messages: conversationMessages });
+
+  // Get persisted read receipts for this conversation (Fix: persistent read ticks)
+  const receipts = readReceipts.get(conversationId) || new Map();
+  const readTimestamps = Array.from(receipts.entries()).map(([pubkey, timestamp]) => ({
+    pubkey,
+    timestamp
+  }));
+
+  res.json({
+    messages: conversationMessages,
+    readTimestamps
+  });
 });
 
 // Group messages endpoint
@@ -121,7 +135,18 @@ app.get('/group-messages/:groupId', (req, res) => {
   }
 
   const msgs = groupMessages.get(groupId) || [];
-  res.json({ messages: msgs });
+
+  // Get persisted read receipts for this group (Fix: persistent read ticks)
+  const receipts = groupReadReceipts.get(groupId) || new Map();
+  const readTimestamps = Array.from(receipts.entries()).map(([pubkey, timestamp]) => ({
+    pubkey,
+    timestamp
+  }));
+
+  res.json({
+    messages: msgs,
+    readTimestamps
+  });
 });
 
 // WebSocket connection
@@ -303,6 +328,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('messages_read', ({ conversationId, readerPubkey, latestTimestamp }) => {
+    // Persist read receipt (Fix: persistent read ticks across sessions)
+    if (!readReceipts.has(conversationId)) {
+      readReceipts.set(conversationId, new Map());
+    }
+    const existing = readReceipts.get(conversationId).get(readerPubkey) || 0;
+    if (latestTimestamp > existing) {
+      readReceipts.get(conversationId).set(readerPubkey, latestTimestamp);
+      console.log(`💾 Persisted read receipt: ${conversationId.slice(0, 8)}... by ${readerPubkey.slice(0, 8)}... at ${latestTimestamp}`);
+    }
+
     // Forward to all others in the conversation room
     socket.to(conversationId).emit('messages_read', {
       conversationId,
@@ -312,6 +347,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('group_messages_read', ({ groupId, readerPubkey, latestTimestamp }) => {
+    // Persist read receipt (Fix: persistent read ticks across sessions)
+    if (!groupReadReceipts.has(groupId)) {
+      groupReadReceipts.set(groupId, new Map());
+    }
+    const existing = groupReadReceipts.get(groupId).get(readerPubkey) || 0;
+    if (latestTimestamp > existing) {
+      groupReadReceipts.get(groupId).set(readerPubkey, latestTimestamp);
+      console.log(`💾 Persisted group read receipt: ${groupId.slice(0, 8)}... by ${readerPubkey.slice(0, 8)}... at ${latestTimestamp}`);
+    }
+
     socket.to(`group_${groupId}`).emit('group_messages_read', {
       groupId,
       readerPubkey,
