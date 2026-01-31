@@ -7,14 +7,17 @@ import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { theme } from '../theme';
 import EmojiPicker from '../components/EmojiPicker';
-import { getGroupAvatar, setGroupAvatar, getGroupLocalName, setGroupLocalName } from '../utils/domains';
+import ContactProfileModal from '../components/ContactProfileModal';
+import { getGroupAvatar, setGroupAvatar, getGroupLocalName, setGroupLocalName, getContactCustomName, getCachedDomain, setContactCustomName } from '../utils/domains';
+import { getUserProfilePDA } from '../utils/transactions';
 
 export default function GroupInfoScreen() {
   const route = useRoute();
   const navigation = useNavigation();
   const { groupId, groupName: routeGroupName } = route.params as { groupId: string; groupName?: string };
 
-  const { groups, leaveGroup, kickMember, updateGroup, wallet, loading } = useMessenger();
+  const messenger = useMessenger();
+  const { groups, leaveGroup, kickMember, updateGroup, wallet, loading, connection } = messenger;
 
   const [group, setGroup] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -24,6 +27,9 @@ export default function GroupInfoScreen() {
   const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
   const [groupAvatar, setGroupAvatarState] = useState<string | null>(null);
   const [localGroupName, setLocalGroupNameState] = useState<string | null>(null);
+  const [selectedMember, setSelectedMember] = useState<any>(null);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [memberProfiles, setMemberProfiles] = useState<Map<string, { name: string; avatar: string }>>(new Map());
 
   useEffect(() => {
     // Find group in loaded groups
@@ -54,6 +60,70 @@ export default function GroupInfoScreen() {
     };
     loadLocalData();
   }, [groups, groupId, wallet]);
+
+  // Load member profiles (Fix 3)
+  useEffect(() => {
+    const loadMemberProfiles = async () => {
+      if (!group || !wallet?.publicKey) return;
+
+      const profiles = new Map<string, { name: string; avatar: string }>();
+
+      for (const member of group.members) {
+        const memberPubkey = member.toBase58();
+
+        try {
+          // Try to get custom name first
+          const customName = await getContactCustomName(wallet.publicKey, member);
+          if (customName) {
+            profiles.set(memberPubkey, { name: customName, avatar: '' });
+            continue;
+          }
+
+          // Try cached domain
+          const cachedDomain = await getCachedDomain(wallet.publicKey, member);
+          if (cachedDomain) {
+            profiles.set(memberPubkey, { name: cachedDomain, avatar: '' });
+            continue;
+          }
+
+          // Fetch from on-chain
+          const profilePDA = getUserProfilePDA(member);
+          const accountInfo = await connection.getAccountInfo(profilePDA);
+
+          if (accountInfo) {
+            const data = accountInfo.data;
+            let offset = 8 + 32; // Skip discriminator + owner
+
+            // Read display name
+            const nameLength = data.readUInt32LE(offset);
+            offset += 4;
+            const nameBytes = data.slice(offset, offset + nameLength);
+            const name = new TextDecoder().decode(nameBytes);
+            offset += nameLength;
+
+            // Read avatar
+            const avatarType = data.readUInt8(offset);
+            offset += 1;
+            const avatarLength = data.readUInt32LE(offset);
+            offset += 4;
+            const avatarBytes = data.slice(offset, offset + avatarLength);
+            const avatar = new TextDecoder().decode(avatarBytes);
+
+            profiles.set(memberPubkey, { name: name || memberPubkey, avatar: avatarType === 0 ? avatar : '' });
+          } else {
+            profiles.set(memberPubkey, { name: memberPubkey, avatar: '' });
+          }
+        } catch (error) {
+          console.error(`Failed to load profile for ${memberPubkey}:`, error);
+          profiles.set(memberPubkey, { name: memberPubkey, avatar: '' });
+        }
+      }
+
+      setMemberProfiles(profiles);
+    };
+
+    loadMemberProfiles();
+  }, [group, wallet]);
 
   // Display name priority: local custom name > route groupName > on-chain name > default
   const displayName = localGroupName || routeGroupName || group?.name || 'Group';
@@ -142,6 +212,56 @@ export default function GroupInfoScreen() {
     }
   };
 
+  // Member contact modal helpers (Fix 3)
+  const handleMemberRename = async (memberPubkey: string, newName: string) => {
+    if (!wallet.publicKey) return;
+    try {
+      await setContactCustomName(wallet.publicKey, new PublicKey(memberPubkey), newName);
+      // Reload member profiles
+      const profile = memberProfiles.get(memberPubkey);
+      if (profile) {
+        setMemberProfiles(prev => {
+          const updated = new Map(prev);
+          updated.set(memberPubkey, { ...profile, name: newName });
+          return updated;
+        });
+      }
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to rename member');
+    }
+  };
+
+  const handleMemberResetName = async (memberPubkey: string) => {
+    if (!wallet.publicKey) return;
+    try {
+      await setContactCustomName(wallet.publicKey, new PublicKey(memberPubkey), ''); // Clear custom name
+      // Reload member profiles
+      // Would need to fetch on-chain name again, for now just keep existing
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to reset name');
+    }
+  };
+
+  const selectedMemberContact = messenger.contacts.find(
+    c => selectedMember && c.publicKey.toBase58() === selectedMember.pubkey
+  );
+  const selectedMemberIsContact = !!selectedMemberContact;
+
+  const selectedMemberOriginalName = selectedMember
+    ? (memberProfiles.get(selectedMember.pubkey)?.name || selectedMember.pubkey)
+    : '';
+
+  const selectedMemberGroupsInCommon = React.useMemo(() => {
+    if (!selectedMember || !wallet?.publicKey) return [];
+    return messenger.groups
+      .filter(g => g.members.some(m => m.toBase58() === selectedMember.pubkey))
+      .map(g => ({
+        groupId: Buffer.from(g.groupId).toString('hex'),
+        name: g.name,
+        avatar: messenger.groupAvatars.get(Buffer.from(g.groupId).toString('hex')),
+      }));
+  }, [messenger.groups, messenger.groupAvatars, selectedMember, wallet.publicKey]);
+
   if (!group) {
     return (
       <View style={styles.container}>
@@ -226,18 +346,35 @@ export default function GroupInfoScreen() {
           const memberPubkey = member.toBase58();
           const isSelf = wallet?.publicKey?.equals(member);
           const isCreator = group.creator.equals(member);
+          const profile = memberProfiles.get(memberPubkey);
+          const memberName = profile?.name || memberPubkey.slice(0, 16) + '...';
+          const memberAvatar = profile?.avatar;
 
           return (
             <List.Item
               key={memberPubkey}
-              title={memberPubkey.slice(0, 16) + '...'}
+              title={memberName}
               description={isCreator ? 'Admin' : 'Member'}
+              onPress={() => {
+                setSelectedMember({
+                  pubkey: memberPubkey,
+                  displayName: memberName,
+                  avatar: memberAvatar,
+                });
+                setProfileModalVisible(true);
+              }}
               left={(props) => (
-                <Avatar.Text
-                  {...props}
-                  size={40}
-                  label={memberPubkey.slice(0, 2).toUpperCase()}
-                />
+                memberAvatar && Array.from(memberAvatar).length === 1 ? (
+                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 24 }}>{memberAvatar}</Text>
+                  </View>
+                ) : (
+                  <Avatar.Text
+                    {...props}
+                    size={40}
+                    label={memberName[0]?.toUpperCase() || '?'}
+                  />
+                )
               )}
               right={
                 isAdmin && !isSelf && !isCreator
@@ -328,6 +465,79 @@ export default function GroupInfoScreen() {
         onDismiss={() => setEmojiPickerVisible(false)}
         onSelect={handleEmojiSelect}
       />
+
+      {/* Member Contact Profile Modal (Fix 3) */}
+      {selectedMember && (
+        <ContactProfileModal
+          visible={profileModalVisible}
+          onDismiss={() => {
+            setProfileModalVisible(false);
+            setSelectedMember(null);
+          }}
+          pubkey={selectedMember.pubkey}
+          displayName={selectedMember.displayName}
+          originalName={selectedMemberOriginalName}
+          avatar={selectedMember.avatar}
+          walletAddress={selectedMember.pubkey}
+          isContact={selectedMemberIsContact}
+          groupsInCommon={selectedMemberGroupsInCommon}
+          onRename={(newName) => handleMemberRename(selectedMember.pubkey, newName)}
+          onResetName={() => handleMemberResetName(selectedMember.pubkey)}
+          onAddContact={async () => {
+            try {
+              await messenger.invite(new PublicKey(selectedMember.pubkey));
+              Alert.alert('Success', 'Contact invitation sent');
+              setProfileModalVisible(false);
+            } catch (error: any) {
+              Alert.alert('Error', 'Failed to send invitation');
+            }
+          }}
+          onDeleteContact={async () => {
+            Alert.alert(
+              'Delete Contact',
+              `Remove ${selectedMember.displayName} from your contacts?`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await messenger.deleteContact(new PublicKey(selectedMember.pubkey));
+                      Alert.alert('Success', 'Contact deleted');
+                      setProfileModalVisible(false);
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message);
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+          onBlockContact={async () => {
+            Alert.alert(
+              'Block Contact',
+              `Block ${selectedMember.displayName}?`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Block',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await messenger.blockContact(new PublicKey(selectedMember.pubkey));
+                      Alert.alert('Success', 'Contact blocked');
+                      setProfileModalVisible(false);
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message);
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+        />
+      )}
     </ScrollView>
   );
 }

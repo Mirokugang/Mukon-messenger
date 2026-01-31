@@ -131,7 +131,6 @@ export default function ContactsScreen({ navigation }: any) {
       id: pubkeyStr,
       displayName,
       pubkey: pubkeyStr,
-      publicKey: contact.publicKey,
       state: contact.state, // Invited, Requested, Accepted, Rejected, Blocked
       lastMessage: lastMessageText,
       timestamp: lastMessage ? new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
@@ -552,6 +551,52 @@ export default function ContactsScreen({ navigation }: any) {
     return true; // 'All'
   });
 
+  // Contact profile modal helpers (Fix 1)
+  const handleContactRename = async (contactPubkey: string, newName: string) => {
+    if (!wallet.publicKey) return;
+    try {
+      await setContactCustomName(wallet.publicKey, new PublicKey(contactPubkey), newName);
+      setRefreshKey(prev => prev + 1); // Trigger refresh
+      // Update the modal's displayed name
+      if (selectedContactForProfile && selectedContactForProfile.pubkey === contactPubkey) {
+        setSelectedContactForProfile({
+          ...selectedContactForProfile,
+          displayName: newName,
+        });
+      }
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to rename contact');
+    }
+  };
+
+  const handleContactResetName = async (contactPubkey: string) => {
+    if (!wallet.publicKey) return;
+    try {
+      await setContactCustomName(wallet.publicKey, new PublicKey(contactPubkey), ''); // Clear custom name
+      setRefreshKey(prev => prev + 1); // Trigger refresh
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to reset name');
+    }
+  };
+
+  // Compute values for selected contact modal
+  const selectedContactOriginalName = React.useMemo(() => {
+    if (!selectedContactForProfile) return '';
+    const contact = messenger.contacts.find(c => c.publicKey.toBase58() === selectedContactForProfile.pubkey);
+    return contact?.displayName || selectedContactForProfile.pubkey;
+  }, [selectedContactForProfile, messenger.contacts]);
+
+  const selectedContactGroupsInCommon = React.useMemo(() => {
+    if (!selectedContactForProfile || !wallet.publicKey) return [];
+    return messenger.groups
+      .filter(g => g.members.some(m => m.toBase58() === selectedContactForProfile.pubkey))
+      .map(g => ({
+        groupId: Buffer.from(g.groupId).toString('hex'),
+        name: g.name,
+        avatar: messenger.groupAvatars.get(Buffer.from(g.groupId).toString('hex')),
+      }));
+  }, [messenger.groups, messenger.groupAvatars, selectedContactForProfile, wallet.publicKey]);
+
   return (
     <View style={styles.container}>
       <Searchbar
@@ -736,9 +781,13 @@ export default function ContactsScreen({ navigation }: any) {
           }}
           pubkey={selectedContactForProfile.pubkey}
           displayName={selectedContactForProfile.displayName}
+          originalName={selectedContactOriginalName}
           avatar={selectedContactForProfile.avatar}
           walletAddress={selectedContactForProfile.pubkey}
           isContact={true}
+          groupsInCommon={selectedContactGroupsInCommon}
+          onRename={(newName) => handleContactRename(selectedContactForProfile.pubkey, newName)}
+          onResetName={() => handleContactResetName(selectedContactForProfile.pubkey)}
           onDeleteContact={() => {
             Alert.alert(
               'Delete Contact',

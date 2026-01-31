@@ -20,6 +20,7 @@ export default function ChatScreen({ route, navigation }: any) {
   const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
   const [deleteMenuVisible, setDeleteMenuVisible] = React.useState<string | null>(null);
   const [displayName, setDisplayName] = React.useState(contact.displayName || contact.pubkey);
+  const [originalName, setOriginalName] = React.useState(contact.displayName || contact.pubkey);
   const [renameDialogVisible, setRenameDialogVisible] = React.useState(false);
   const [newName, setNewName] = React.useState('');
   const [reactionPickerVisible, setReactionPickerVisible] = React.useState(false);
@@ -157,25 +158,25 @@ export default function ChatScreen({ route, navigation }: any) {
       if (!wallet.publicKey) return;
       const pubkey = new PublicKey(contact.pubkey);
 
-      // Try custom name first
+      // Determine original name (domain or on-chain, no custom)
+      let original = contact.displayName || contact.pubkey;
+      const cachedDomain = await getCachedDomain(wallet.publicKey, pubkey);
+      if (cachedDomain) {
+        original = cachedDomain.endsWith('.sol') || cachedDomain.endsWith('.skr')
+          ? cachedDomain
+          : `${cachedDomain}.sol`;
+      }
+      setOriginalName(original);
+
+      // Try custom name first for display
       const customName = await getContactCustomName(wallet.publicKey, pubkey);
       if (customName) {
         setDisplayName(customName);
         return;
       }
 
-      // Try cached domain
-      const cachedDomain = await getCachedDomain(wallet.publicKey, pubkey);
-      if (cachedDomain) {
-        const domainDisplay = cachedDomain.endsWith('.sol') || cachedDomain.endsWith('.skr')
-          ? cachedDomain
-          : `${cachedDomain}.sol`;
-        setDisplayName(domainDisplay);
-        return;
-      }
-
-      // Use contact.displayName or pubkey
-      setDisplayName(contact.displayName || contact.pubkey);
+      // Use original name for display
+      setDisplayName(original);
     };
 
     loadContactName();
@@ -194,6 +195,41 @@ export default function ChatScreen({ route, navigation }: any) {
       Alert.alert('Error', 'Failed to rename contact');
     }
   };
+
+  // Contact modal handlers (Fix 1)
+  const handleModalRename = async (newName: string) => {
+    if (!wallet.publicKey) return;
+    try {
+      const pubkey = new PublicKey(contact.pubkey);
+      await setContactCustomName(wallet.publicKey, pubkey, newName);
+      setDisplayName(newName);
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to rename contact');
+    }
+  };
+
+  const handleResetName = async () => {
+    if (!wallet.publicKey) return;
+    try {
+      const pubkey = new PublicKey(contact.pubkey);
+      await setContactCustomName(wallet.publicKey, pubkey, ''); // Clear custom name
+      setDisplayName(originalName);
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to reset name');
+    }
+  };
+
+  // Compute groups in common (Fix 1)
+  const groupsInCommon = React.useMemo(() => {
+    if (!wallet.publicKey) return [];
+    return messenger.groups
+      .filter(g => g.members.some(m => m.toBase58() === contact.pubkey))
+      .map(g => ({
+        groupId: Buffer.from(g.groupId).toString('hex'),
+        name: g.name,
+        avatar: messenger.groupAvatars.get(Buffer.from(g.groupId).toString('hex')),
+      }));
+  }, [messenger.groups, messenger.groupAvatars, contact.pubkey, wallet.publicKey]);
 
   React.useLayoutEffect(() => {
     navigation.setOptions({
@@ -628,9 +664,13 @@ export default function ChatScreen({ route, navigation }: any) {
         onDismiss={() => setProfileModalVisible(false)}
         pubkey={contact.pubkey}
         displayName={displayName}
+        originalName={originalName}
         avatar={contact.avatar}
         walletAddress={contact.pubkey}
         isContact={true}
+        groupsInCommon={groupsInCommon}
+        onRename={handleModalRename}
+        onResetName={handleResetName}
         onDeleteContact={() => {
           Alert.alert(
             'Delete Contact',
