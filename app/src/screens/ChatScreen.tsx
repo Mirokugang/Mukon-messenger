@@ -539,9 +539,7 @@ export default function ChatScreen({ route, navigation }: any) {
           onChangeText={setMessage}
           placeholder="Message..."
           mode="outlined"
-          style={[styles.input, { minHeight: 48, textAlignVertical: 'center' }]}
-          multiline
-          maxLength={1000}
+          style={styles.input}
           outlineColor="transparent"
           activeOutlineColor={theme.colors.primary}
           placeholderTextColor={theme.colors.textSecondary}

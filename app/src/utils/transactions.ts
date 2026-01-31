@@ -18,6 +18,7 @@ const DISCRIMINATORS = {
   accept_group_invite: Buffer.from([0xbe, 0x30, 0x7f, 0x36, 0x49, 0x93, 0xe3, 0xfd]), // be307f364993e3fd
   block: Buffer.from([0xee, 0xea, 0x6e, 0x15, 0x79, 0x2b, 0x32, 0x91]), // eeea6e15792b3291
   close_group: Buffer.from([0x28, 0xbb, 0xc9, 0xbb, 0x12, 0xc2, 0x7a, 0xe8]), // 28bbc9bb12c27ae8
+  close_group_key: Buffer.from([0x5d, 0x2b, 0xd4, 0x16, 0x33, 0x97, 0x3e, 0x03]), // 5d2bd41633973e03
   close_profile: Buffer.from([0xa7, 0x24, 0xb5, 0x08, 0x88, 0x9e, 0x2e, 0xcf]), // a724b508889e2ecf
   create_group: Buffer.from([0x4f, 0x3c, 0x9e, 0x86, 0x3d, 0xc7, 0x38, 0xf8]), // 4f3c9e863dc738f8
   invite: Buffer.from([0xf2, 0x18, 0xeb, 0xe1, 0x85, 0xd3, 0xbd, 0xfa]), // f218ebe185d3bdfa
@@ -27,6 +28,7 @@ const DISCRIMINATORS = {
   register: Buffer.from([0xd3, 0x7c, 0x43, 0x0f, 0xd3, 0xc2, 0xb2, 0xf0]), // d37c430fd3c2b2f0
   reject: Buffer.from([0x87, 0x07, 0x3f, 0x55, 0x83, 0x72, 0x6f, 0xe0]), // 87073f5583726fe0
   reject_group_invite: Buffer.from([0xa2, 0xe1, 0x8b, 0x8e, 0x35, 0xb6, 0xd9, 0xe7]), // a2e18b8e35b6d9e7
+  store_group_key: Buffer.from([0x25, 0x39, 0x5b, 0x44, 0x63, 0x70, 0xce, 0x9b]), // 25395b446370ce9b
   unblock: Buffer.from([0xc2, 0x31, 0xad, 0x2b, 0xf6, 0xa4, 0x0e, 0x0b]), // c231ad2bf6a40e0b
   update_group: Buffer.from([0x09, 0xf2, 0x01, 0x6e, 0x5b, 0x16, 0xac, 0x61]), // 09f2016e5b16ac61
   update_profile: Buffer.from([0x62, 0x43, 0x63, 0xce, 0x56, 0x73, 0xaf, 0x01]), // 624363ce5673af01
@@ -68,6 +70,14 @@ export function getGroupPDA(groupId: Uint8Array): PublicKey {
 export function getGroupInvitePDA(groupId: Uint8Array, invitee: PublicKey): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
     [Buffer.from('group_invite'), Buffer.from(groupId), invitee.toBuffer(), Buffer.from([1])],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+export function getGroupKeySharePDA(groupId: Uint8Array, member: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('group_key'), Buffer.from(groupId), member.toBuffer(), Buffer.from([1])],
     PROGRAM_ID
   );
   return pda;
@@ -568,6 +578,68 @@ export function createCloseGroupInstruction(
   });
 }
 
+/**
+ * Build store_group_key instruction (stores encrypted group key on-chain for recovery)
+ */
+export function createStoreGroupKeyInstruction(
+  payer: PublicKey,
+  groupId: Uint8Array,
+  encryptedKey: Uint8Array,
+  nonce: Uint8Array
+): TransactionInstruction {
+  const groupKeyShare = getGroupKeySharePDA(groupId, payer);
+  const group = getGroupPDA(groupId);
+
+  // Build instruction data: discriminator + group_id + encrypted_key (Vec<u8>) + nonce
+  const encryptedKeyBuffer = Buffer.from(encryptedKey);
+  const nonceBuffer = Buffer.from(nonce);
+
+  const data = Buffer.concat([
+    DISCRIMINATORS.store_group_key,
+    Buffer.from(groupId), // 32 bytes
+    Buffer.from([
+      encryptedKeyBuffer.length & 0xff,
+      (encryptedKeyBuffer.length >> 8) & 0xff,
+      (encryptedKeyBuffer.length >> 16) & 0xff,
+      (encryptedKeyBuffer.length >> 24) & 0xff,
+    ]), // Vec length prefix (4 bytes little-endian)
+    encryptedKeyBuffer,
+    nonceBuffer, // 24 bytes
+  ]);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: groupKeyShare, isSigner: false, isWritable: true },
+      { pubkey: group, isSigner: false, isWritable: false },
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Build close_group_key instruction (closes group key share account and recovers rent)
+ */
+export function createCloseGroupKeyInstruction(
+  payer: PublicKey,
+  groupId: Uint8Array
+): TransactionInstruction {
+  const groupKeyShare = getGroupKeySharePDA(groupId, payer);
+
+  const data = DISCRIMINATORS.close_group_key;
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: groupKeyShare, isSigner: false, isWritable: true },
+      { pubkey: payer, isSigner: true, isWritable: true },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
 // ========== TRANSACTION BUILDER ==========
 
 /**
@@ -662,7 +734,21 @@ export interface GroupInvite {
   createdAt: bigint;
 }
 
+export interface GroupKeyShare {
+  groupId: Uint8Array;
+  member: PublicKey;
+  encryptedKey: Uint8Array;
+  nonce: Uint8Array;
+}
+
 export function deserializeGroup(data: Buffer): Group {
+  // Validate Group account discriminator (defense-in-depth)
+  const expectedDiscriminator = Buffer.from([0xd1, 0xf9, 0xd0, 0x3f, 0xb6, 0x59, 0xba, 0xfe]);
+  const actualDiscriminator = data.slice(0, 8);
+  if (!actualDiscriminator.equals(expectedDiscriminator)) {
+    throw new Error('Invalid Group account discriminator');
+  }
+
   let offset = 8; // Skip 8-byte discriminator
 
   // Read group_id (32 bytes)
@@ -750,5 +836,34 @@ export function deserializeGroupInvite(data: Buffer): GroupInvite {
     invitee,
     status,
     createdAt,
+  };
+}
+
+export function deserializeGroupKeyShare(data: Buffer): GroupKeyShare {
+  let offset = 8; // Skip 8-byte discriminator
+
+  // Read group_id (32 bytes)
+  const groupId = new Uint8Array(data.slice(offset, offset + 32));
+  offset += 32;
+
+  // Read member (32 bytes)
+  const member = new PublicKey(data.slice(offset, offset + 32));
+  offset += 32;
+
+  // Read encrypted_key (Vec<u8>: 4 bytes length + data)
+  const encryptedKeyLength = data.readUInt32LE(offset);
+  offset += 4;
+  const encryptedKey = new Uint8Array(data.slice(offset, offset + encryptedKeyLength));
+  offset += encryptedKeyLength;
+
+  // Read nonce (24 bytes)
+  const nonce = new Uint8Array(data.slice(offset, offset + 24));
+  offset += 24;
+
+  return {
+    groupId,
+    member,
+    encryptedKey,
+    nonce,
   };
 }

@@ -542,9 +542,7 @@ export default function GroupChatScreen() {
           onChangeText={setMessageText}
           placeholder="Message..."
           mode="outlined"
-          style={[styles.input, { minHeight: 48, textAlignVertical: 'center' }]}
-          multiline
-          maxLength={1000}
+          style={styles.input}
           outlineColor="transparent"
           activeOutlineColor={theme.colors.primary}
           placeholderTextColor={theme.colors.textSecondary}

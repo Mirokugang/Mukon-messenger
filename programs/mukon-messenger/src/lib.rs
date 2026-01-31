@@ -33,6 +33,8 @@ pub enum ErrorCode {
     TokenAccountRequired,
     #[msg("Token account does not belong to user")]
     InvalidTokenAccount,
+    #[msg("Unauthorized")]
+    Unauthorized,
 }
 
 // Deterministic hash function for chat PDAs
@@ -627,6 +629,49 @@ pub mod mukon_messenger {
 
         Ok(())
     }
+
+    pub fn store_group_key(
+        ctx: Context<StoreGroupKey>,
+        _group_id: [u8; 32],
+        encrypted_key: Vec<u8>,
+        nonce: [u8; 24],
+    ) -> Result<()> {
+        let key_share = &mut ctx.accounts.group_key_share;
+        let group = &ctx.accounts.group;
+
+        // Verify payer is a member of the group
+        require!(
+            group.members.contains(&ctx.accounts.payer.key()),
+            ErrorCode::NotGroupMember
+        );
+
+        // Store the encrypted key share
+        key_share.group_id = group.group_id;
+        key_share.member = ctx.accounts.payer.key();
+        key_share.encrypted_key = encrypted_key;
+        key_share.nonce = nonce;
+
+        msg!("Group key stored for member: {:?}", ctx.accounts.payer.key());
+
+        Ok(())
+    }
+
+    pub fn close_group_key(ctx: Context<CloseGroupKey>) -> Result<()> {
+        // Verify the key share belongs to the payer
+        require!(
+            ctx.accounts.group_key_share.member == ctx.accounts.payer.key(),
+            ErrorCode::Unauthorized
+        );
+
+        // Transfer lamports back to member
+        let key_share_lamports = ctx.accounts.group_key_share.to_account_info().lamports();
+        **ctx.accounts.group_key_share.to_account_info().lamports.borrow_mut() = 0;
+        **ctx.accounts.payer.lamports.borrow_mut() += key_share_lamports;
+
+        msg!("Group key share closed for member: {:?}", ctx.accounts.payer.key());
+
+        Ok(())
+    }
 }
 
 // ========== ACCOUNT STRUCTURES ==========
@@ -636,6 +681,7 @@ const USER_PROFILE_VERSION: [u8; 1] = [1];
 const CONVERSATION_VERSION: [u8; 1] = [1];
 const GROUP_VERSION: [u8; 1] = [1];
 const GROUP_INVITE_VERSION: [u8; 1] = [1];
+const GROUP_KEY_SHARE_VERSION: [u8; 1] = [1];
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum PeerState {
@@ -710,6 +756,14 @@ pub struct GroupInvite {
     pub invitee: Pubkey,
     pub status: GroupInviteStatus,
     pub created_at: i64,
+}
+
+#[account]
+pub struct GroupKeyShare {
+    pub group_id: [u8; 32],
+    pub member: Pubkey,
+    pub encrypted_key: Vec<u8>,
+    pub nonce: [u8; 24],
 }
 
 // ========== CONTEXT STRUCTURES ==========
@@ -1015,6 +1069,40 @@ pub struct CloseGroup<'info> {
         bump
     )]
     pub group: Account<'info, Group>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(group_id: [u8; 32], encrypted_key: Vec<u8>, nonce: [u8; 24])]
+pub struct StoreGroupKey<'info> {
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + 32 + 32 + (4 + 48) + 24,  // disc + group_id + member + Vec(encrypted_key) + nonce
+        seeds = [b"group_key", group_id.as_ref(), payer.key().as_ref(), GROUP_KEY_SHARE_VERSION.as_ref()],
+        bump
+    )]
+    pub group_key_share: Account<'info, GroupKeyShare>,
+    #[account(
+        seeds = [b"group", group_id.as_ref(), GROUP_VERSION.as_ref()],
+        bump
+    )]
+    pub group: Account<'info, Group>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseGroupKey<'info> {
+    #[account(
+        mut,
+        close = payer,
+        seeds = [b"group_key", group_key_share.group_id.as_ref(), payer.key().as_ref(), GROUP_KEY_SHARE_VERSION.as_ref()],
+        bump
+    )]
+    pub group_key_share: Account<'info, GroupKeyShare>,
     #[account(mut)]
     pub payer: Signer<'info>,
 }

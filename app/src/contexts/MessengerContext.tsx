@@ -10,6 +10,7 @@ import {
   getWalletDescriptorPDA,
   getGroupPDA,
   getGroupInvitePDA,
+  getGroupKeySharePDA,
   createRegisterInstruction,
   createUpdateProfileInstruction,
   createCloseProfileInstruction,
@@ -26,12 +27,16 @@ import {
   createLeaveGroupInstruction,
   createKickMemberInstruction,
   createCloseGroupInstruction,
+  createStoreGroupKeyInstruction,
+  createCloseGroupKeyInstruction,
   buildTransaction,
   deserializeWalletDescriptor,
   deserializeGroup,
   deserializeGroupInvite,
+  deserializeGroupKeyShare,
   type Group,
   type GroupInvite,
+  type GroupKeyShare,
   type TokenGate,
 } from '../utils/transactions';
 import { deriveEncryptionKeypair, getChatHash } from '../utils/encryption';
@@ -234,6 +239,60 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       console.error('❌ Failed to derive encryption keys:', error);
     }
   }, [wallet?.publicKey, encryptionKeys]);
+
+  // Recover missing group keys from on-chain encrypted backups
+  useEffect(() => {
+    if (!wallet?.publicKey || !encryptionKeys || groups.length === 0) return;
+    if (!hasLoadedPersistedKeys.current) return; // Wait for local keys to load first
+
+    const recoverMissingKeys = async () => {
+      for (const group of groups) {
+        const groupIdHex = Buffer.from(group.groupId).toString('hex');
+
+        // Skip if we already have the key
+        if (groupKeys.has(groupIdHex)) continue;
+
+        console.log(`🔍 Missing key for group ${groupIdHex.slice(0, 8)}..., attempting recovery from on-chain`);
+
+        try {
+          // Fetch GroupKeyShare PDA
+          const groupKeySharePDA = getGroupKeySharePDA(group.groupId, wallet.publicKey);
+          const accountInfo = await connection.getAccountInfo(groupKeySharePDA);
+
+          if (!accountInfo) {
+            console.warn(`⚠️ No on-chain key backup found for group ${groupIdHex.slice(0, 8)}...`);
+            continue;
+          }
+
+          // Deserialize GroupKeyShare
+          const keyShare = deserializeGroupKeyShare(accountInfo.data);
+
+          // Decrypt the group key
+          const decryptedKey = nacl.box.open(
+            keyShare.encryptedKey,
+            keyShare.nonce,
+            encryptionKeys.publicKey,
+            encryptionKeys.secretKey
+          );
+
+          if (decryptedKey) {
+            setGroupKeys(prev => {
+              const updated = new Map(prev);
+              updated.set(groupIdHex, decryptedKey);
+              return updated;
+            });
+            console.log(`✅ Recovered group key from on-chain for ${groupIdHex.slice(0, 8)}...`);
+          } else {
+            console.error(`❌ Failed to decrypt on-chain key for group ${groupIdHex.slice(0, 8)}...`);
+          }
+        } catch (err) {
+          console.error(`Failed to recover key for group ${groupIdHex.slice(0, 8)}:`, err);
+        }
+      }
+    };
+
+    recoverMissingKeys();
+  }, [wallet?.publicKey, encryptionKeys, groups, groupKeys]);
 
   // Initialize socket connection (ONE instance for entire app)
   useEffect(() => {
@@ -471,6 +530,37 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
                 return updated;
               });
               console.log('✅ Group key decrypted and stored');
+
+              // Store encrypted key on-chain for recovery
+              if (wallet?.publicKey && wallet.signTransaction) {
+                try {
+                  const groupIdBytes = Buffer.from(groupId, 'hex');
+                  const storeNonce = nacl.randomBytes(nacl.box.nonceLength);
+                  const storeEncryptedKey = nacl.box(
+                    decryptedKey,
+                    storeNonce,
+                    currentEncryptionKeys.publicKey,
+                    currentEncryptionKeys.secretKey
+                  );
+
+                  const storeKeyIx = createStoreGroupKeyInstruction(
+                    wallet.publicKey,
+                    groupIdBytes,
+                    storeEncryptedKey,
+                    storeNonce
+                  );
+
+                  const storeKeyTx = await buildTransaction(connection, wallet.publicKey, [storeKeyIx]);
+                  const signedStoreKeyTx = await wallet.signTransaction(storeKeyTx);
+                  const storeKeySig = await connection.sendTransaction(signedStoreKeyTx);
+                  await connection.confirmTransaction(storeKeySig, 'confirmed');
+
+                  console.log('💾 Stored encrypted group key on-chain for recovery');
+                } catch (storeErr) {
+                  console.error('Failed to store group key on-chain:', storeErr);
+                  // Non-fatal - local key still works
+                }
+              }
             } else {
               console.error('❌ Failed to decrypt group key (decryption returned null)');
             }
@@ -1151,6 +1241,34 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
       console.log(`✅ Group created with ${invitees.length} invites:`, groupIdHex);
 
+      // Store admin's own encrypted key share on-chain for recovery
+      try {
+        const adminNonce = nacl.randomBytes(nacl.box.nonceLength);
+        const adminEncryptedKey = nacl.box(
+          groupSecret,
+          adminNonce,
+          encryptionKeys.publicKey,
+          encryptionKeys.secretKey
+        );
+
+        const storeKeyIx = createStoreGroupKeyInstruction(
+          wallet.publicKey,
+          groupId,
+          adminEncryptedKey,
+          adminNonce
+        );
+
+        const storeKeyTx = await buildTransaction(connection, wallet.publicKey, [storeKeyIx]);
+        const signedStoreKeyTx = await wallet.signTransaction(storeKeyTx);
+        const storeKeySig = await connection.sendTransaction(signedStoreKeyTx);
+        await connection.confirmTransaction(storeKeySig, 'confirmed');
+
+        console.log(`💾 Stored admin's encrypted group key on-chain`);
+      } catch (err) {
+        console.error('Failed to store admin group key on-chain:', err);
+        // Non-fatal - local key still works
+      }
+
       // Share group key with all invitees via Socket.IO
       if (socket && encryptionKeys) {
         for (const inviteePubkey of invitees) {
@@ -1192,6 +1310,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
               });
 
               console.log(`🔑 Shared group key with ${inviteePubkey.toBase58().slice(0, 8)}...`);
+
+              // Also store invitee's encrypted key share on-chain for recovery
+              try {
+                // Note: We need to use invitee as payer for their GroupKeyShare account
+                // For now, we'll skip on-chain storage for invitees - they'll store their own key when they accept
+                // This is a limitation of not having the invitee's signature here
+                // TODO: Store invitee keys on-chain when they accept the invite
+              } catch (err) {
+                console.error(`Failed to store invitee group key on-chain:`, err);
+              }
             } else {
               console.warn(`⚠️ Could not find encryption pubkey for ${inviteePubkey.toBase58().slice(0, 8)}...`);
             }
@@ -1372,8 +1500,13 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
     setLoading(true);
     try {
-      const instruction = createLeaveGroupInstruction(wallet.publicKey, groupId);
-      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      // Build instructions: leave group + close key share (to recover rent)
+      const instructions = [
+        createLeaveGroupInstruction(wallet.publicKey, groupId),
+        createCloseGroupKeyInstruction(wallet.publicKey, groupId),
+      ];
+
+      const transaction = await buildTransaction(connection, wallet.publicKey, instructions);
       const signedTransaction = await wallet.signTransaction(transaction);
       const txSignature = await connection.sendTransaction(signedTransaction);
       await connection.confirmTransaction(txSignature, 'confirmed');
