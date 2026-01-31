@@ -139,6 +139,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   const encryptionKeysRef = useRef<nacl.BoxKeyPair | null>(null);
   const contactsRef = useRef<Contact[]>([]);
   const groupKeysRef = useRef<Map<string, Uint8Array>>(new Map());
+  const hasLoadedPersistedKeys = useRef(false); // Guard to prevent race condition on persist
 
   const connection = useMemo(
     () => new Connection(SOLANA_RPC_URL, 'confirmed'),
@@ -161,6 +162,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   // Persist group keys to AsyncStorage (Fix 2e)
   useEffect(() => {
     if (!wallet?.publicKey) return;
+    if (!hasLoadedPersistedKeys.current) return; // GUARD: Don't persist until keys are loaded
 
     const persistGroupKeys = async () => {
       try {
@@ -200,6 +202,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         }
       } catch (error) {
         console.error('Failed to load persisted group keys:', error);
+      } finally {
+        hasLoadedPersistedKeys.current = true; // Unlock persist effect
       }
     };
 
@@ -373,8 +377,20 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           const updated = new Map(prev);
           const groupMsgs = updated.get(message.groupId) || [];
 
-          // Check for duplicates
-          const exists = groupMsgs.some(m => m.id === message.id);
+          // Enhanced duplicate check (matches DM pattern)
+          const exists = groupMsgs.some(
+            (m: any) =>
+              m.id === message.id ||
+              (m.encrypted && message.encrypted &&
+               m.encrypted === message.encrypted &&
+               m.nonce === message.nonce &&
+               m.sender === message.sender) ||
+              (m.content && message.content &&
+               m.content === message.content &&
+               m.sender === message.sender &&
+               Math.abs(m.timestamp - message.timestamp) < 5000)
+          );
+
           if (!exists) {
             updated.set(message.groupId, [...groupMsgs, message]);
           }
@@ -1134,6 +1150,57 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       await loadGroups();
 
       console.log(`✅ Group created with ${invitees.length} invites:`, groupIdHex);
+
+      // Share group key with all invitees via Socket.IO
+      if (socket && encryptionKeys) {
+        for (const inviteePubkey of invitees) {
+          try {
+            // Try to find invitee in contacts first
+            let inviteeEncryptionPubkey: Uint8Array | undefined = contacts.find(c =>
+              c.publicKey.equals(inviteePubkey)
+            )?.encryptionPublicKey;
+
+            // If not in contacts, fetch from on-chain
+            if (!inviteeEncryptionPubkey) {
+              console.log(`Fetching encryption pubkey from on-chain for ${inviteePubkey.toBase58().slice(0, 8)}...`);
+              const profilePDA = getUserProfilePDA(inviteePubkey);
+              const profileAccount = await connection.getAccountInfo(profilePDA);
+
+              if (profileAccount) {
+                // UserProfile layout: discriminator(8) + owner(32) + name(4+len) + avatar_type(1) + avatar_data(4+len) + encryption_pubkey(32)
+                // We need the last 32 bytes
+                const data = profileAccount.data;
+                inviteeEncryptionPubkey = new Uint8Array(data.slice(data.length - 32));
+              }
+            }
+
+            if (inviteeEncryptionPubkey) {
+              // Encrypt group key with invitee's public key
+              const nonce = nacl.randomBytes(nacl.box.nonceLength);
+              const encryptedKey = nacl.box(
+                groupSecret,
+                nonce,
+                inviteeEncryptionPubkey,
+                encryptionKeys.secretKey
+              );
+
+              socket.emit('share_group_key', {
+                groupId: groupIdHex,
+                recipientPubkey: inviteePubkey.toBase58(),
+                encryptedKey: Buffer.from(encryptedKey).toString('base64'),
+                nonce: Buffer.from(nonce).toString('base64'),
+              });
+
+              console.log(`🔑 Shared group key with ${inviteePubkey.toBase58().slice(0, 8)}...`);
+            } else {
+              console.warn(`⚠️ Could not find encryption pubkey for ${inviteePubkey.toBase58().slice(0, 8)}...`);
+            }
+          } catch (err) {
+            console.error(`Failed to share group key with ${inviteePubkey.toBase58().slice(0, 8)}:`, err);
+          }
+        }
+      }
+
       return { groupId, txSignature };
     } catch (error) {
       console.error('Failed to create group with members:', error);
@@ -1187,14 +1254,32 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       const groupSecret = groupKeysRef.current.get(groupIdHex);
 
       if (groupSecret && socket) {
-        const inviteeContact = contacts.find(c => c.publicKey.equals(inviteePubkey));
-        if (inviteeContact?.encryptionPublicKey) {
+        // Try to find invitee in contacts first
+        let inviteeEncryptionPubkey: Uint8Array | undefined = contacts.find(c =>
+          c.publicKey.equals(inviteePubkey)
+        )?.encryptionPublicKey;
+
+        // If not in contacts, fetch from on-chain
+        if (!inviteeEncryptionPubkey) {
+          console.log(`Fetching encryption pubkey from on-chain for ${inviteePubkey.toBase58().slice(0, 8)}...`);
+          const profilePDA = getUserProfilePDA(inviteePubkey);
+          const profileAccount = await connection.getAccountInfo(profilePDA);
+
+          if (profileAccount) {
+            // UserProfile layout: discriminator(8) + owner(32) + name(4+len) + avatar_type(1) + avatar_data(4+len) + encryption_pubkey(32)
+            // We need the last 32 bytes
+            const data = profileAccount.data;
+            inviteeEncryptionPubkey = new Uint8Array(data.slice(data.length - 32));
+          }
+        }
+
+        if (inviteeEncryptionPubkey) {
           // Encrypt group key with invitee's public key
           const nonce = nacl.randomBytes(nacl.box.nonceLength);
           const encryptedKey = nacl.box(
             groupSecret,
             nonce,
-            inviteeContact.encryptionPublicKey,
+            inviteeEncryptionPubkey,
             encryptionKeys.secretKey
           );
 
@@ -1206,6 +1291,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           });
 
           console.log('🔑 Shared group key with invitee via Socket.IO');
+        } else {
+          console.warn(`⚠️ Could not find encryption pubkey for ${inviteePubkey.toBase58().slice(0, 8)}...`);
         }
       }
 
@@ -1506,6 +1593,13 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       // NOTE: Removed dataSize filter because Group accounts realloc on member changes
       const creatorGroups = await connection.getProgramAccounts(PROGRAM_ID, {
         filters: [
+          {
+            // Filter for Group account discriminator at offset 0
+            memcmp: {
+              offset: 0,
+              bytes: bs58.encode(Buffer.from([0xd1, 0xf9, 0xd0, 0x3f, 0xb6, 0x59, 0xba, 0xfe])),
+            },
+          },
           {
             // Filter for accounts where creator = wallet.publicKey (offset 8 + 32 = 40)
             memcmp: {

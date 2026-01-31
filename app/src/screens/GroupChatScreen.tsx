@@ -59,11 +59,12 @@ export default function GroupChatScreen() {
   // Load group avatar
   useEffect(() => {
     const loadAvatar = async () => {
-      const avatar = await getGroupAvatar(groupId);
+      if (!wallet?.publicKey) return;
+      const avatar = await getGroupAvatar(wallet.publicKey, groupId);
       setGroupAvatar(avatar);
     };
     loadAvatar();
-  }, [groupId]);
+  }, [groupId, wallet]);
 
   // Set header title with avatar
   useEffect(() => {
@@ -541,7 +542,7 @@ export default function GroupChatScreen() {
           onChangeText={setMessageText}
           placeholder="Message..."
           mode="outlined"
-          style={styles.input}
+          style={[styles.input, { minHeight: 48, textAlignVertical: 'center' }]}
           multiline
           maxLength={1000}
           outlineColor="transparent"

@@ -13,33 +13,37 @@ export default function ProfileScreen() {
   const [displayName, setDisplayName] = React.useState('');
   const [emojiPickerVisible, setEmojiPickerVisible] = React.useState(false);
   const [selectedEmoji, setSelectedEmoji] = React.useState<string | null>(null);
+  const [initialName, setInitialName] = React.useState('');
+  const [initialEmoji, setInitialEmoji] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (messenger.profile) {
-      setDisplayName(messenger.profile.displayName || '');
-      setSelectedEmoji(messenger.profile.avatarUrl || null);
+      const name = messenger.profile.displayName || '';
+      const emoji = messenger.profile.avatarUrl || null;
+      setDisplayName(name);
+      setSelectedEmoji(emoji);
+      setInitialName(name);
+      setInitialEmoji(emoji);
     }
   }, [messenger.profile]);
 
-  const handleEmojiSelect = async (emoji: string) => {
-    setSelectedEmoji(emoji);
+  const hasUnsavedChanges = displayName !== initialName || selectedEmoji !== initialEmoji;
 
-    try {
-      // Update profile with new emoji
-      await messenger.updateProfile(displayName, 'Emoji', emoji);
-      Alert.alert('Success', 'Avatar updated!');
-    } catch (error: any) {
-      Alert.alert('Error', 'Failed to update avatar');
-      console.error('Failed to update avatar:', error);
-    }
+  const handleEmojiSelect = (emoji: string) => {
+    setSelectedEmoji(emoji);
+    // No transaction here - save on button press
   };
 
   const saveProfile = async () => {
+    if (!hasUnsavedChanges) return;
+
     try {
       await messenger.updateProfile(displayName.trim(), 'Emoji', selectedEmoji || undefined);
-      Alert.alert('Success', 'Username updated!');
+      setInitialName(displayName.trim());
+      setInitialEmoji(selectedEmoji);
+      Alert.alert('Success', 'Profile updated!');
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to update username');
+      Alert.alert('Error', 'Failed to update profile');
       console.error('Failed to update profile:', error);
     }
   };
@@ -129,8 +133,9 @@ export default function ProfileScreen() {
         onPress={saveProfile}
         style={styles.button}
         buttonColor={theme.colors.primary}
+        disabled={!hasUnsavedChanges}
       >
-        Update Username
+        Update Profile
       </Button>
 
       <Button

@@ -141,17 +141,18 @@ export default function ChatScreen({ route, navigation }: any) {
   // Load custom/domain name for contact
   React.useEffect(() => {
     const loadContactName = async () => {
+      if (!wallet.publicKey) return;
       const pubkey = new PublicKey(contact.pubkey);
 
       // Try custom name first
-      const customName = await getContactCustomName(pubkey);
+      const customName = await getContactCustomName(wallet.publicKey, pubkey);
       if (customName) {
         setDisplayName(customName);
         return;
       }
 
       // Try cached domain
-      const cachedDomain = await getCachedDomain(pubkey);
+      const cachedDomain = await getCachedDomain(wallet.publicKey, pubkey);
       if (cachedDomain) {
         const domainDisplay = cachedDomain.endsWith('.sol') || cachedDomain.endsWith('.skr')
           ? cachedDomain
@@ -168,11 +169,11 @@ export default function ChatScreen({ route, navigation }: any) {
   }, [contact]);
 
   const handleRename = async () => {
-    if (!newName.trim()) return;
+    if (!newName.trim() || !wallet.publicKey) return;
 
     try {
       const pubkey = new PublicKey(contact.pubkey);
-      await setContactCustomName(pubkey, newName);
+      await setContactCustomName(wallet.publicKey, pubkey, newName);
       setDisplayName(newName);
       setRenameDialogVisible(false);
       setNewName('');
@@ -538,7 +539,9 @@ export default function ChatScreen({ route, navigation }: any) {
           onChangeText={setMessage}
           placeholder="Message..."
           mode="outlined"
-          style={styles.input}
+          style={[styles.input, { minHeight: 48, textAlignVertical: 'center' }]}
+          multiline
+          maxLength={1000}
           outlineColor="transparent"
           activeOutlineColor={theme.colors.primary}
           placeholderTextColor={theme.colors.textSecondary}
