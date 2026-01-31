@@ -453,11 +453,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
             // Increment unread count if not from current user and not in active conversation (Fix 7)
             const currentActiveConv = activeConversationRef.current;
-            if (message.sender !== wallet?.publicKey?.toBase58() &&
-                message.conversationId !== currentActiveConv) {
+            const isFromOther = message.sender !== wallet?.publicKey?.toBase58();
+            const isNotActive = message.conversationId !== currentActiveConv;
+            console.log(`📬 DM received - From other: ${isFromOther}, Not active: ${isNotActive}, Active conv: ${currentActiveConv?.slice(0, 8) || 'none'}`);
+
+            if (isFromOther && isNotActive) {
               setUnreadCounts(prev => {
                 const updated = new Map(prev);
-                updated.set(message.conversationId, (updated.get(message.conversationId) || 0) + 1);
+                const newCount = (updated.get(message.conversationId) || 0) + 1;
+                updated.set(message.conversationId, newCount);
+                console.log(`✅ Incremented unread count for ${message.conversationId.slice(0, 8)}... to ${newCount}`);
                 return updated;
               });
             }
@@ -510,6 +515,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     });
 
     newSocket.on('messages_read', ({ conversationId, readerPubkey, latestTimestamp }) => {
+      console.log(`📗 Received read receipt from ${readerPubkey.slice(0, 8)}... for conversation ${conversationId.slice(0, 8)}...`);
       if (readerPubkey === wallet?.publicKey?.toBase58()) return; // Ignore own read receipts
 
       // Update read timestamps for persistence
@@ -564,10 +570,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
             // Increment unread if not from self and not viewing this group
             const currentActiveGroup = activeGroupRoomRef.current;
-            if (message.sender !== wallet?.publicKey?.toBase58() && message.groupId !== currentActiveGroup) {
+            const isFromOther = message.sender !== wallet?.publicKey?.toBase58();
+            const isNotActive = message.groupId !== currentActiveGroup;
+            console.log(`📬 Group msg received - From other: ${isFromOther}, Not active: ${isNotActive}, Active group: ${currentActiveGroup?.slice(0, 8) || 'none'}`);
+
+            if (isFromOther && isNotActive) {
               setUnreadCounts(prev => {
                 const updated = new Map(prev);
-                updated.set(message.groupId, (updated.get(message.groupId) || 0) + 1);
+                const newCount = (updated.get(message.groupId) || 0) + 1;
+                updated.set(message.groupId, newCount);
+                console.log(`✅ Incremented unread count for group ${message.groupId.slice(0, 8)}... to ${newCount}`);
                 return updated;
               });
             }
@@ -1079,6 +1091,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           readerPubkey: wallet.publicKey.toBase58(),
           latestTimestamp: latestMessage.timestamp,
         });
+        console.log(`📖 Emitted read receipt for conversation ${conversationId.slice(0, 8)}...`);
       }
 
       console.log('Joining conversation:', conversationId);
@@ -1308,6 +1321,26 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       loadGroupInvites();
     }
   }, [wallet?.publicKey, encryptionKeys]);
+
+  // Fix 5b: Fetch group avatars AFTER groups load AND socket connects
+  useEffect(() => {
+    if (!socket || groups.length === 0) return;
+
+    console.log(`🎨 Fetching avatars for ${groups.length} groups...`);
+    for (const group of groups) {
+      const groupIdHex = Buffer.from(group.groupId).toString('hex');
+      socket.emit('get_group_avatar', { groupId: groupIdHex }, (avatar: string | null) => {
+        if (avatar) {
+          setGroupAvatars(prev => {
+            const updated = new Map(prev);
+            updated.set(groupIdHex, avatar);
+            return updated;
+          });
+          console.log(`✅ Fetched avatar for group ${groupIdHex.slice(0, 8)}...: ${avatar}`);
+        }
+      });
+    }
+  }, [socket, groups.length]);
 
   // ========== GROUP METHODS ==========
 
@@ -1932,23 +1965,6 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
       setGroups(loadedGroups);
       console.log(`📂 Loaded ${loadedGroups.length} groups total`);
-
-      // Fix 5: Fetch avatars for all loaded groups
-      if (socket && loadedGroups.length > 0) {
-        for (const group of loadedGroups) {
-          const groupIdHex = Buffer.from(group.groupId).toString('hex');
-          socket.emit('get_group_avatar', { groupId: groupIdHex }, (avatar: string | null) => {
-            if (avatar) {
-              setGroupAvatars(prev => {
-                const updated = new Map(prev);
-                updated.set(groupIdHex, avatar);
-                return updated;
-              });
-              console.log(`🎨 Loaded avatar for group ${groupIdHex.slice(0, 8)}...: ${avatar}`);
-            }
-          });
-        }
-      }
     } catch (error) {
       console.error('Failed to load groups:', error);
       setGroups([]);
