@@ -18,7 +18,8 @@ export interface ContactDisplayInfo {
  */
 export function useContactNames(
   ownerWallet: PublicKey | null,
-  contacts: Array<{ publicKey: PublicKey; displayName?: string }>
+  contacts: Array<{ publicKey: PublicKey; displayName?: string }>,
+  refreshKey?: number
 ) {
   const [displayNames, setDisplayNames] = useState<Map<string, ContactDisplayInfo>>(new Map());
 
@@ -72,7 +73,7 @@ export function useContactNames(
     };
 
     loadDisplayNames();
-  }, [ownerWallet, contacts]);
+  }, [ownerWallet, contacts, refreshKey]);
 
   return displayNames;
 }

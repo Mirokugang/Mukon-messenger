@@ -90,7 +90,7 @@ export default function ContactsListScreen({ navigation }: any) {
         style={styles.searchbar}
       />
 
-      {/* Action Buttons */}
+      {/* Action Buttons (Fix 2: 3 vertical buttons) */}
       <View style={styles.actionsContainer}>
         <Button
           mode="contained"
@@ -107,6 +107,17 @@ export default function ContactsListScreen({ navigation }: any) {
           style={styles.actionButton}
         >
           Find by Wallet Address
+        </Button>
+        <Button
+          mode="outlined"
+          icon="account-search"
+          onPress={() => {
+            // TODO: Implement find by name functionality
+            // For now, just focus the search bar
+          }}
+          style={styles.actionButton}
+        >
+          Find by Name
         </Button>
       </View>
 
@@ -132,6 +143,7 @@ export default function ContactsListScreen({ navigation }: any) {
             <TouchableOpacity onPress={() => handleContactPress(item)}>
               <List.Item
                 title={item.displayName}
+                description={`${item.pubkey.slice(0, 8)}...${item.pubkey.slice(-8)}`}
                 left={(props) => (
                   item.avatar && Array.from(item.avatar).length === 1 ? (
                     <View style={styles.avatarContainer}>
@@ -174,13 +186,13 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   actionsContainer: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     paddingHorizontal: 12,
     gap: 8,
     marginBottom: 12,
   },
   actionButton: {
-    flex: 1,
+    width: '100%',
   },
   divider: {
     backgroundColor: theme.colors.surfaceVariant,

@@ -4,7 +4,7 @@ import { TextInput, Button, Text, Switch, Portal, Dialog, List, Checkbox, Search
 import { useNavigation } from '@react-navigation/native';
 import { useMessenger } from '../contexts/MessengerContext';
 import { PublicKey } from '@solana/web3.js';
-import { setGroupAvatar } from '../utils/domains';
+// Removed local-only setGroupAvatar import (Fix 5)
 import { useWallet } from '../contexts/WalletContext';
 import EmojiPicker from '../components/EmojiPicker';
 import { theme } from '../theme';
@@ -12,7 +12,7 @@ import { theme } from '../theme';
 export default function CreateGroupScreen() {
   const navigation = useNavigation();
   const wallet = useWallet();
-  const { createGroupWithMembers, contacts, loading } = useMessenger();
+  const { createGroupWithMembers, contacts, loading, setGroupAvatarShared } = useMessenger();
 
   const [groupName, setGroupName] = useState('');
   const [groupEmoji, setGroupEmoji] = useState<string | null>(null);
@@ -95,10 +95,10 @@ export default function CreateGroupScreen() {
       console.log('✅ Group created with', invitees.length, 'invites:', groupIdHex);
       console.log('Transaction:', txSignature);
 
-      // Save group avatar if selected (Feature 6)
-      if (groupEmoji && wallet.publicKey) {
-        await setGroupAvatar(wallet.publicKey, groupIdHex, groupEmoji);
-        console.log('✅ Group avatar saved:', groupEmoji);
+      // Save group avatar if selected (Fix 5: use shared backend storage)
+      if (groupEmoji) {
+        await setGroupAvatarShared(groupIdHex, groupEmoji);
+        console.log('✅ Group avatar saved to backend:', groupEmoji);
       }
 
       setShowSuccess(true);

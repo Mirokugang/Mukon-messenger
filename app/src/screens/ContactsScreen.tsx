@@ -29,7 +29,7 @@ export default function ContactsScreen({ navigation }: any) {
   const [filter, setFilter] = React.useState<FilterType>('All');
   const [selectedContactForProfile, setSelectedContactForProfile] = React.useState<any>(null);
   const [profileModalVisible, setProfileModalVisible] = React.useState(false);
-  const displayNames = useContactNames(wallet.publicKey, messenger.contacts);
+  const displayNames = useContactNames(wallet.publicKey, messenger.contacts, refreshKey);
 
   // Compute values for selected contact modal (must be before early returns)
   const selectedContactOriginalName = React.useMemo(() => {
@@ -593,6 +593,13 @@ export default function ContactsScreen({ navigation }: any) {
     try {
       await setContactCustomName(wallet.publicKey, new PublicKey(contactPubkey), ''); // Clear custom name
       setRefreshKey(prev => prev + 1); // Trigger refresh
+      // Update selectedContactForProfile to show original name immediately (Fix 1)
+      if (selectedContactForProfile && selectedContactForProfile.pubkey === contactPubkey) {
+        setSelectedContactForProfile((prev: any) => ({
+          ...prev,
+          displayName: prev.originalName || contactPubkey,
+        }));
+      }
     } catch (error: any) {
       Alert.alert('Error', 'Failed to reset name');
     }

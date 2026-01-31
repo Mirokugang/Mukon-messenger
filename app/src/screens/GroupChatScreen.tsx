@@ -230,7 +230,12 @@ export default function GroupChatScreen() {
       }
     };
 
-    storeGroupKeyOnChain();
+    // Fix 3: Delay backup by 10 seconds to avoid back-to-back wallet prompts
+    const backupTimeout = setTimeout(() => {
+      storeGroupKeyOnChain();
+    }, 10000);
+
+    return () => clearTimeout(backupTimeout);
   }, [groupId]);
 
   // Load messages and join room on mount
@@ -541,13 +546,13 @@ export default function GroupChatScreen() {
                     <Text style={styles.messageTime}>
                       {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </Text>
-                    {/* Feature 5: Read/sent indicators for outgoing messages */}
+                    {/* Feature 5: Read/sent indicators for outgoing messages (Fix 6: corrected tick colors) */}
                     {item.isMe && item.status && (
                       <MaterialCommunityIcons
-                        name="check"
+                        name={item.status === 'read' ? 'check-all' : 'check'}
                         size={12}
                         color={item.status === 'read' ? theme.colors.secondary : theme.colors.textSecondary}
-                        style={{ marginLeft: 4, opacity: item.status === 'sent' ? 0.4 : 1 }}
+                        style={{ marginLeft: 4, opacity: item.status === 'read' ? 1 : 0.5 }}
                       />
                     )}
                   </View>

@@ -145,11 +145,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   const [readTimestamps, setReadTimestamps] = useState<Map<string, number>>(new Map()); // conversationId/groupId -> latest read timestamp
   const [groupAvatars, setGroupAvatars] = useState<Map<string, string>>(new Map()); // groupId -> emoji (Fix 4)
 
-  // Refs for socket handlers to avoid stale closures (Fix 2b, 2d)
+  // Refs for socket handlers to avoid stale closures (Fix 2b, 2d, Fix 7)
   const encryptionKeysRef = useRef<nacl.BoxKeyPair | null>(null);
   const contactsRef = useRef<Contact[]>([]);
   const groupKeysRef = useRef<Map<string, Uint8Array>>(new Map());
   const activeGroupRoomRef = useRef<string | null>(null);
+  const activeConversationRef = useRef<string | null>(null); // Fix 7: DM unread badges
   const hasLoadedPersistedKeys = useRef(false); // Guard to prevent race condition on persist
 
   const connection = useMemo(
@@ -173,6 +174,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   useEffect(() => {
     activeGroupRoomRef.current = activeGroupRoom;
   }, [activeGroupRoom]);
+
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
 
   // Persist group keys to AsyncStorage (Fix 2e)
   useEffect(() => {
@@ -446,22 +451,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           if (!exists) {
             updated.set(message.conversationId, [...conversationMessages, message]);
 
-            // Increment unread count if not from current user and not in active conversation
-            setActiveConversation((activeConv) => {
-              setUnreadCounts((prevUnread) => {
-                if (message.sender !== wallet?.publicKey?.toBase58() &&
-                    message.conversationId !== activeConv) {
-                  const newUnread = new Map(prevUnread);
-                  newUnread.set(
-                    message.conversationId,
-                    (newUnread.get(message.conversationId) || 0) + 1
-                  );
-                  return newUnread;
-                }
-                return prevUnread;
+            // Increment unread count if not from current user and not in active conversation (Fix 7)
+            const currentActiveConv = activeConversationRef.current;
+            if (message.sender !== wallet?.publicKey?.toBase58() &&
+                message.conversationId !== currentActiveConv) {
+              setUnreadCounts(prev => {
+                const updated = new Map(prev);
+                updated.set(message.conversationId, (updated.get(message.conversationId) || 0) + 1);
+                return updated;
               });
-              return activeConv;
-            });
+            }
           }
 
           return updated;
@@ -1933,6 +1932,23 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
       setGroups(loadedGroups);
       console.log(`📂 Loaded ${loadedGroups.length} groups total`);
+
+      // Fix 5: Fetch avatars for all loaded groups
+      if (socket && loadedGroups.length > 0) {
+        for (const group of loadedGroups) {
+          const groupIdHex = Buffer.from(group.groupId).toString('hex');
+          socket.emit('get_group_avatar', { groupId: groupIdHex }, (avatar: string | null) => {
+            if (avatar) {
+              setGroupAvatars(prev => {
+                const updated = new Map(prev);
+                updated.set(groupIdHex, avatar);
+                return updated;
+              });
+              console.log(`🎨 Loaded avatar for group ${groupIdHex.slice(0, 8)}...: ${avatar}`);
+            }
+          });
+        }
+      }
     } catch (error) {
       console.error('Failed to load groups:', error);
       setGroups([]);

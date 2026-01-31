@@ -51,8 +51,8 @@ const AVATAR_EMOJIS = [
 export default function EmojiPicker({ visible, onDismiss, onSelect }: EmojiPickerProps) {
   return (
     <Portal>
-      <Dialog visible={visible} onDismiss={onDismiss} style={styles.dialog}>
-        <Dialog.Title>Choose Avatar Emoji</Dialog.Title>
+      <Dialog visible={visible} onDismiss={onDismiss} style={[styles.dialog, { backgroundColor: theme.colors.surface }]}>
+        <Dialog.Title style={{ color: theme.colors.textPrimary }}>Choose Avatar Emoji</Dialog.Title>
         <Dialog.ScrollArea style={styles.scrollArea}>
           <ScrollView contentContainerStyle={styles.emojiGrid}>
             {AVATAR_EMOJIS.map((emoji, index) => (

@@ -30,6 +30,8 @@ export default function GroupInfoScreen() {
   const [selectedMember, setSelectedMember] = useState<any>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [memberProfiles, setMemberProfiles] = useState<Map<string, { name: string; avatar: string }>>(new Map());
+  // Fix 4: Dark confirmation dialog
+  const [confirmDialog, setConfirmDialog] = useState<{ visible: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     // Find group in loaded groups
@@ -133,48 +135,36 @@ export default function GroupInfoScreen() {
   };
 
   const handleLeaveGroup = () => {
-    Alert.alert(
-      'Leave Group',
-      'Are you sure you want to leave this group?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await leaveGroup(Buffer.from(groupId, 'hex'));
-              navigation.goBack();
-              navigation.goBack(); // Go back to conversations list
-            } catch (error) {
-              Alert.alert('Error', `Failed to leave group: ${error.message}`);
-            }
-          },
-        },
-      ]
-    );
+    setConfirmDialog({
+      visible: true,
+      title: 'Leave Group',
+      message: 'Are you sure you want to leave this group?',
+      onConfirm: async () => {
+        try {
+          await leaveGroup(Buffer.from(groupId, 'hex'));
+          navigation.goBack();
+          navigation.goBack(); // Go back to conversations list
+        } catch (error) {
+          Alert.alert('Error', `Failed to leave group: ${error.message}`);
+        }
+      },
+    });
   };
 
   const handleKickMember = (memberPubkey: PublicKey) => {
-    Alert.alert(
-      'Kick Member',
-      'Are you sure you want to remove this member?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Kick',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await kickMember(Buffer.from(groupId, 'hex'), memberPubkey);
-              // Reload group info
-            } catch (error) {
-              Alert.alert('Error', `Failed to kick member: ${error.message}`);
-            }
-          },
-        },
-      ]
-    );
+    setConfirmDialog({
+      visible: true,
+      title: 'Kick Member',
+      message: 'Are you sure you want to remove this member?',
+      onConfirm: async () => {
+        try {
+          await kickMember(Buffer.from(groupId, 'hex'), memberPubkey);
+          // Reload group info
+        } catch (error) {
+          Alert.alert('Error', `Failed to kick member: ${error.message}`);
+        }
+      },
+    });
   };
 
   const handleRename = async () => {
@@ -538,6 +528,36 @@ export default function GroupInfoScreen() {
           }}
         />
       )}
+
+      {/* Fix 4: Dark confirmation dialog */}
+      <Portal>
+        <Dialog
+          visible={confirmDialog?.visible || false}
+          onDismiss={() => setConfirmDialog(null)}
+          style={{ backgroundColor: theme.colors.surface }}
+        >
+          <Dialog.Title style={{ color: theme.colors.textPrimary }}>
+            {confirmDialog?.title}
+          </Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: theme.colors.textPrimary }}>
+              {confirmDialog?.message}
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setConfirmDialog(null)}>Cancel</Button>
+            <Button
+              onPress={() => {
+                confirmDialog?.onConfirm();
+                setConfirmDialog(null);
+              }}
+              textColor={theme.colors.error}
+            >
+              Confirm
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </ScrollView>
   );
 }
