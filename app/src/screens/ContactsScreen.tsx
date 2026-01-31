@@ -11,6 +11,7 @@ import { useMessenger } from '../contexts/MessengerContext';
 import { useContactNames } from '../hooks/useContactNames';
 import { setContactCustomName, getContactCustomName, getCachedDomain, getGroupAvatar } from '../utils/domains';
 import ContactProfileModal from '../components/ContactProfileModal';
+import ChatBackground from '../components/ChatBackground';
 
 type FilterType = 'All' | 'DMs' | 'Groups' | 'Unread';
 
@@ -599,6 +600,7 @@ export default function ContactsScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
+      <ChatBackground />
       <Searchbar
         placeholder="Search conversations..."
         onChangeText={setSearchQuery}
