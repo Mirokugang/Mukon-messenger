@@ -268,10 +268,10 @@ export default function CreateGroupScreen() {
       </View>
 
       <Portal>
-        <Dialog visible={showSuccess} onDismiss={() => setShowSuccess(false)}>
-          <Dialog.Title>Success! 🎉</Dialog.Title>
+        <Dialog visible={showSuccess} onDismiss={() => setShowSuccess(false)} style={{ backgroundColor: theme.colors.surface }}>
+          <Dialog.Title style={{ color: theme.colors.textPrimary }}>Success! 🎉</Dialog.Title>
           <Dialog.Content>
-            <Text>Group created successfully!</Text>
+            <Text style={{ color: theme.colors.textPrimary }}>Group created successfully!</Text>
           </Dialog.Content>
         </Dialog>
       </Portal>

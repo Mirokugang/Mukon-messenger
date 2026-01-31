@@ -157,10 +157,10 @@ export default function SettingsScreen() {
       </View>
 
       <Portal>
-        <Dialog visible={deleteDialogVisible} dismissable={false}>
-          <Dialog.Title>Closing Profile...</Dialog.Title>
+        <Dialog visible={deleteDialogVisible} dismissable={false} style={{ backgroundColor: theme.colors.surface }}>
+          <Dialog.Title style={{ color: theme.colors.textPrimary }}>Closing Profile...</Dialog.Title>
           <Dialog.Content>
-            <Text>Please confirm the transaction in your wallet.</Text>
+            <Text style={{ color: theme.colors.textPrimary }}>Please confirm the transaction in your wallet.</Text>
           </Dialog.Content>
         </Dialog>
       </Portal>

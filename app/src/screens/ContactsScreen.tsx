@@ -741,8 +741,8 @@ export default function ContactsScreen({ navigation }: any) {
 
       {/* Rename Contact Dialog */}
       <Portal>
-        <Dialog visible={renameDialogVisible} onDismiss={() => setRenameDialogVisible(false)}>
-          <Dialog.Title>Rename Contact</Dialog.Title>
+        <Dialog visible={renameDialogVisible} onDismiss={() => setRenameDialogVisible(false)} style={{ backgroundColor: theme.colors.surface }}>
+          <Dialog.Title style={{ color: theme.colors.textPrimary }}>Rename Contact</Dialog.Title>
           <Dialog.Content>
             <Text style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
               Current: {renamingContact?.currentName}
