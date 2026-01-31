@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { TextInput, IconButton, Text, Menu, Dialog, Portal, Button, Avatar } from 'react-native-paper';
 import * as Clipboard from 'expo-clipboard';
@@ -22,6 +21,7 @@ import ReactionPicker from '../components/ReactionPicker';
 import ChatBackground from '../components/ChatBackground';
 import { getUserProfilePDA, createStoreGroupKeyInstruction, buildTransaction } from '../utils/transactions';
 import { getGroupAvatar } from '../utils/domains';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function GroupChatScreen() {
   const route = useRoute();
@@ -43,6 +43,7 @@ export default function GroupChatScreen() {
     readTimestamps,
   } = useMessenger();
 
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
   const [menuVisible, setMenuVisible] = useState<string | null>(null);
@@ -341,7 +342,7 @@ export default function GroupChatScreen() {
       }, 100);
     } catch (error) {
       console.error('Failed to send message:', error);
-      Alert.alert('Error', 'Failed to send message');
+      showAlert('Error', 'Failed to send message');
     }
   };
 
@@ -419,12 +420,12 @@ export default function GroupChatScreen() {
 
   const handleCopyMessage = async (content: string) => {
     await Clipboard.setStringAsync(content);
-    Alert.alert('Copied', 'Message copied to clipboard');
+    showAlert('Copied', 'Message copied to clipboard');
     setMenuVisible(null);
   };
 
   const handlePinMessage = (messageId: string) => {
-    Alert.alert('Coming Soon', 'Message pinning will be added soon');
+    showAlert('Coming Soon', 'Message pinning will be added soon');
     setMenuVisible(null);
   };
 
@@ -441,19 +442,19 @@ export default function GroupChatScreen() {
       if (isCreator) {
         // On-chain rename via updateGroup
         await updateGroup(currentGroup.groupId, newName);
-        Alert.alert('Success', 'Group renamed successfully');
+        showAlert('Success', 'Group renamed successfully');
       } else {
         // Local rename only (AsyncStorage)
         const { setGroupLocalName } = await import('../utils/domains');
         await setGroupLocalName(wallet.publicKey, groupId, newName);
-        Alert.alert('Success', 'Group renamed locally');
+        showAlert('Success', 'Group renamed locally');
       }
 
       setRenameDialogVisible(false);
       setNewName('');
       navigation.setParams({ groupName: newName } as never);
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to rename group');
+      showAlert('Error', 'Failed to rename group');
     }
   };
 
@@ -748,6 +749,7 @@ export default function GroupChatScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+      {DarkAlertComponent}
     </KeyboardAvoidingView>
   );
 }

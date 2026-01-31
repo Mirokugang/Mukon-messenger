@@ -1,15 +1,17 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { TextInput, Button, Text, Avatar, List } from 'react-native-paper';
 import { theme } from '../theme';
 import { truncateAddress } from '../utils/encryption';
 import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
 import EmojiPicker from '../components/EmojiPicker';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function ProfileScreen() {
   const { publicKey, disconnect } = useWallet();
   const messenger = useMessenger();
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
   const [displayName, setDisplayName] = React.useState('');
   const [emojiPickerVisible, setEmojiPickerVisible] = React.useState(false);
   const [selectedEmoji, setSelectedEmoji] = React.useState<string | null>(null);
@@ -41,15 +43,15 @@ export default function ProfileScreen() {
       await messenger.updateProfile(displayName.trim(), 'Emoji', selectedEmoji || undefined);
       setInitialName(displayName.trim());
       setInitialEmoji(selectedEmoji);
-      Alert.alert('Success', 'Profile updated!');
+      showAlert('Success', 'Profile updated!');
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to update profile');
+      showAlert('Error', 'Failed to update profile');
       console.error('Failed to update profile:', error);
     }
   };
 
   const handleDisconnect = () => {
-    Alert.alert(
+    showAlert(
       'Disconnect Wallet',
       'Are you sure you want to disconnect your wallet?',
       [
@@ -154,6 +156,7 @@ export default function ProfileScreen() {
         onDismiss={() => setEmojiPickerVisible(false)}
         onSelect={handleEmojiSelect}
       />
+      {DarkAlertComponent}
     </ScrollView>
   );
 }

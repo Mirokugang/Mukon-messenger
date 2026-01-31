@@ -1,15 +1,17 @@
 import React from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { TextInput, Button, Text, IconButton } from 'react-native-paper';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
 import { resolveDomain, isDomain, cacheResolvedDomain } from '../utils/domains';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function AddContactScreen({ navigation }: any) {
   const wallet = useWallet();
   const messenger = useMessenger();
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
   const [address, setAddress] = React.useState('');
   const [loading, setLoading] = React.useState(false);
 
@@ -32,7 +34,7 @@ export default function AddContactScreen({ navigation }: any) {
         const resolved = await resolveDomain(address, connection);
 
         if (!resolved) {
-          Alert.alert(
+          showAlert(
             'Domain Not Found',
             `Could not resolve ${address}. Please check the domain name and try again.`
           );
@@ -87,14 +89,14 @@ export default function AddContactScreen({ navigation }: any) {
         }
 
         if (action === 'Re-invite') {
-          Alert.alert('Contact Previously Deleted', message, [
+          showAlert('Contact Previously Deleted', message, [
             { text: 'Cancel', style: 'cancel' },
             {
               text: 'Re-invite',
               onPress: async () => {
                 try {
                   const tx = await messenger.invite(contactPubkey);
-                  Alert.alert('Invitation Sent!', `Re-invited ${displayName}`, [
+                  showAlert('Invitation Sent!', `Re-invited ${displayName}`, [
                     {
                       text: 'OK',
                       onPress: () => {
@@ -104,7 +106,7 @@ export default function AddContactScreen({ navigation }: any) {
                     },
                   ]);
                 } catch (err: any) {
-                  Alert.alert('Error', err.message);
+                  showAlert('Error', err.message);
                 }
                 setLoading(false);
               },
@@ -112,7 +114,7 @@ export default function AddContactScreen({ navigation }: any) {
           ]);
           return;
         } else {
-          Alert.alert('Already in Contacts', message);
+          showAlert('Already in Contacts', message);
           setLoading(false);
           return;
         }
@@ -125,7 +127,7 @@ export default function AddContactScreen({ navigation }: any) {
         ? `${resolvedDomain}.sol`
         : `${contactPubkey.toBase58().slice(0, 8)}...`;
 
-      Alert.alert(
+      showAlert(
         'Invitation Sent!',
         `Invitation sent to ${displayName}\n\nTransaction: ${tx.slice(0, 8)}...`,
         [
@@ -150,7 +152,7 @@ export default function AddContactScreen({ navigation }: any) {
         errorMsg = error.message;
       }
 
-      Alert.alert('Error', errorMsg);
+      showAlert('Error', errorMsg);
     } finally {
       setLoading(false);
     }
@@ -201,6 +203,7 @@ export default function AddContactScreen({ navigation }: any) {
       >
         Send Invitation
       </Button>
+      {DarkAlertComponent}
     </View>
   );
 }

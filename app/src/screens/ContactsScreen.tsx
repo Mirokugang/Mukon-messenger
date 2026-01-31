@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, FlatList, StyleSheet, Alert, TouchableOpacity, ScrollView } from 'react-native';
+import { View, FlatList, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { List, FAB, Searchbar, Avatar, Badge, Text, Button, Menu, Dialog, Portal, TextInput, Chip } from 'react-native-paper';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
@@ -12,12 +12,14 @@ import { useContactNames } from '../hooks/useContactNames';
 import { setContactCustomName, getContactCustomName, getCachedDomain, getGroupAvatar } from '../utils/domains';
 import ContactProfileModal from '../components/ContactProfileModal';
 import ChatBackground from '../components/ChatBackground';
+import { useDarkAlert } from '../components/DarkAlert';
 
 type FilterType = 'All' | 'DMs' | 'Groups' | 'Unread';
 
 export default function ContactsScreen({ navigation }: any) {
   const wallet = useWallet();
   const messenger = useMessenger();
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [registering, setRegistering] = React.useState(false);
   const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
@@ -61,11 +63,11 @@ export default function ContactsScreen({ navigation }: any) {
     setRegistering(true);
     try {
       await messenger.register(''); // Empty display name for now
-      Alert.alert('Success', 'Registration complete! You can now add contacts.');
+      showAlert('Success', 'Registration complete! You can now add contacts.');
       await messenger.loadProfile();
     } catch (error: any) {
       console.error('Registration failed:', error);
-      Alert.alert('Error', 'Registration failed. Please try again.');
+      showAlert('Error', 'Registration failed. Please try again.');
     } finally {
       setRegistering(false);
     }
@@ -222,7 +224,7 @@ export default function ContactsScreen({ navigation }: any) {
             <Menu.Item
               onPress={() => {
                 setGroupMenuVisible(null);
-                Alert.alert(
+                showAlert(
                   'Leave Group',
                   `Leave "${item.displayName}"? You can be re-invited later.`,
                   [
@@ -233,9 +235,9 @@ export default function ContactsScreen({ navigation }: any) {
                       onPress: async () => {
                         try {
                           await messenger.leaveGroup(group.groupId);
-                          Alert.alert('Left', `You left "${item.displayName}"`);
+                          showAlert('Left', `You left "${item.displayName}"`);
                         } catch (error: any) {
-                          Alert.alert('Error', error.message);
+                          showAlert('Error', error.message);
                         }
                       },
                     },
@@ -250,7 +252,7 @@ export default function ContactsScreen({ navigation }: any) {
             <Menu.Item
               onPress={() => {
                 setGroupMenuVisible(null);
-                Alert.alert(
+                showAlert(
                   'Delete Group',
                   `Delete "${item.displayName}"? This will remove the group for all members.`,
                   [
@@ -261,9 +263,9 @@ export default function ContactsScreen({ navigation }: any) {
                       onPress: async () => {
                         try {
                           await messenger.closeGroup(group.groupId);
-                          Alert.alert('Deleted', `"${item.displayName}" has been deleted`);
+                          showAlert('Deleted', `"${item.displayName}" has been deleted`);
                         } catch (error: any) {
-                          Alert.alert('Error', error.message);
+                          showAlert('Error', error.message);
                         }
                       },
                     },
@@ -307,9 +309,9 @@ export default function ContactsScreen({ navigation }: any) {
                 onPress={async () => {
                   try {
                     await messenger.acceptInvitation(new PublicKey(item.pubkey));
-                    Alert.alert('Success', 'Invitation accepted!');
+                    showAlert('Success', 'Invitation accepted!');
                   } catch (error: any) {
-                    Alert.alert('Error', error.message);
+                    showAlert('Error', error.message);
                   }
                 }}
                 style={{ backgroundColor: theme.colors.secondary }}
@@ -322,9 +324,9 @@ export default function ContactsScreen({ navigation }: any) {
                 onPress={async () => {
                   try {
                     await messenger.rejectInvitation(new PublicKey(item.pubkey));
-                    Alert.alert('Declined', 'Invitation declined');
+                    showAlert('Declined', 'Invitation declined');
                   } catch (error: any) {
-                    Alert.alert('Error', error.message);
+                    showAlert('Error', error.message);
                   }
                 }}
               >
@@ -387,7 +389,7 @@ export default function ContactsScreen({ navigation }: any) {
             <Button
               mode="outlined"
               onPress={async () => {
-                Alert.alert(
+                showAlert(
                   'Unblock Contact',
                   `Unblock ${item.displayName || truncateAddress(item.pubkey, 4)}?`,
                   [
@@ -397,9 +399,9 @@ export default function ContactsScreen({ navigation }: any) {
                       onPress: async () => {
                         try {
                           await messenger.unblockContact(new PublicKey(item.pubkey));
-                          Alert.alert('Unblocked', 'Contact unblocked. You can now accept invitations from them.');
+                          showAlert('Unblocked', 'Contact unblocked. You can now accept invitations from them.');
                         } catch (error: any) {
-                          Alert.alert('Error', error.message);
+                          showAlert('Error', error.message);
                         }
                       },
                     },
@@ -477,7 +479,7 @@ export default function ContactsScreen({ navigation }: any) {
         <Menu.Item
           onPress={async () => {
             setMenuVisible(null);
-            Alert.alert(
+            showAlert(
               'Delete Contact',
               `Remove ${item.displayName || truncateAddress(item.pubkey, 4)} from your contacts? You can re-add them later.`,
               [
@@ -488,9 +490,9 @@ export default function ContactsScreen({ navigation }: any) {
                   onPress: async () => {
                     try {
                       await messenger.rejectInvitation(new PublicKey(item.pubkey));
-                      Alert.alert('Deleted', 'Contact removed');
+                      showAlert('Deleted', 'Contact removed');
                     } catch (error: any) {
-                      Alert.alert('Error', error.message);
+                      showAlert('Error', error.message);
                     }
                   },
                 },
@@ -502,7 +504,7 @@ export default function ContactsScreen({ navigation }: any) {
         <Menu.Item
           onPress={async () => {
             setMenuVisible(null);
-            Alert.alert(
+            showAlert(
               'Block Contact',
               `Block ${item.displayName || truncateAddress(item.pubkey, 4)}? They won't be able to contact you until unblocked.`,
               [
@@ -513,9 +515,9 @@ export default function ContactsScreen({ navigation }: any) {
                   onPress: async () => {
                     try {
                       await messenger.blockContact(new PublicKey(item.pubkey));
-                      Alert.alert('Blocked', 'Contact blocked. You can unblock them later.');
+                      showAlert('Blocked', 'Contact blocked. You can unblock them later.');
                     } catch (error: any) {
-                      Alert.alert('Error', error.message);
+                      showAlert('Error', error.message);
                     }
                   },
                 },
@@ -541,7 +543,7 @@ export default function ContactsScreen({ navigation }: any) {
       // Force re-render by updating refresh key
       setRefreshKey(prev => prev + 1);
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to rename contact');
+      showAlert('Error', 'Failed to rename contact');
     }
   };
 
@@ -584,7 +586,7 @@ export default function ContactsScreen({ navigation }: any) {
         });
       }
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to rename contact');
+      showAlert('Error', 'Failed to rename contact');
     }
   };
 
@@ -601,7 +603,7 @@ export default function ContactsScreen({ navigation }: any) {
         }));
       }
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to reset name');
+      showAlert('Error', 'Failed to reset name');
     }
   };
 
@@ -691,9 +693,9 @@ export default function ContactsScreen({ navigation }: any) {
                       onPress={async () => {
                         try {
                           await messenger.acceptGroupInvite(invite.groupId);
-                          Alert.alert('Success', 'Group invitation accepted!');
+                          showAlert('Success', 'Group invitation accepted!');
                         } catch (error: any) {
-                          Alert.alert('Error', error.message);
+                          showAlert('Error', error.message);
                         }
                       }}
                       style={{ backgroundColor: theme.colors.secondary }}
@@ -706,9 +708,9 @@ export default function ContactsScreen({ navigation }: any) {
                       onPress={async () => {
                         try {
                           await messenger.rejectGroupInvite(invite.groupId);
-                          Alert.alert('Declined', 'Group invitation declined');
+                          showAlert('Declined', 'Group invitation declined');
                         } catch (error: any) {
-                          Alert.alert('Error', error.message);
+                          showAlert('Error', error.message);
                         }
                       }}
                     >
@@ -812,7 +814,7 @@ export default function ContactsScreen({ navigation }: any) {
           onRename={(newName) => handleContactRename(selectedContactForProfile.pubkey, newName)}
           onResetName={() => handleContactResetName(selectedContactForProfile.pubkey)}
           onDeleteContact={() => {
-            Alert.alert(
+            showAlert(
               'Delete Contact',
               `Remove ${selectedContactForProfile.displayName} from your contacts? You can re-add them later.`,
               [
@@ -823,11 +825,11 @@ export default function ContactsScreen({ navigation }: any) {
                   onPress: async () => {
                     try {
                       await messenger.rejectInvitation(new PublicKey(selectedContactForProfile.pubkey));
-                      Alert.alert('Deleted', 'Contact removed');
+                      showAlert('Deleted', 'Contact removed');
                       setProfileModalVisible(false);
                       setSelectedContactForProfile(null);
                     } catch (error: any) {
-                      Alert.alert('Error', error.message);
+                      showAlert('Error', error.message);
                     }
                   },
                 },
@@ -835,7 +837,7 @@ export default function ContactsScreen({ navigation }: any) {
             );
           }}
           onBlockContact={() => {
-            Alert.alert(
+            showAlert(
               'Block Contact',
               `Block ${selectedContactForProfile.displayName}? They won't be able to contact you until unblocked.`,
               [
@@ -846,11 +848,11 @@ export default function ContactsScreen({ navigation }: any) {
                   onPress: async () => {
                     try {
                       await messenger.blockContact(new PublicKey(selectedContactForProfile.pubkey));
-                      Alert.alert('Blocked', 'Contact blocked. You can unblock them later.');
+                      showAlert('Blocked', 'Contact blocked. You can unblock them later.');
                       setProfileModalVisible(false);
                       setSelectedContactForProfile(null);
                     } catch (error: any) {
-                      Alert.alert('Error', error.message);
+                      showAlert('Error', error.message);
                     }
                   },
                 },
@@ -859,6 +861,7 @@ export default function ContactsScreen({ navigation }: any) {
           }}
         />
       )}
+      {DarkAlertComponent}
     </View>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, FlatList, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, FlatList, TouchableOpacity } from 'react-native';
 import { TextInput, Button, Text, Switch, Portal, Dialog, List, Checkbox, Searchbar, IconButton } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import { useMessenger } from '../contexts/MessengerContext';
@@ -8,11 +8,13 @@ import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '../contexts/WalletContext';
 import EmojiPicker from '../components/EmojiPicker';
 import { theme } from '../theme';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function CreateGroupScreen() {
   const navigation = useNavigation();
   const wallet = useWallet();
   const { createGroupWithMembers, contacts, loading, setGroupAvatarShared } = useMessenger();
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
 
   const [groupName, setGroupName] = useState('');
   const [groupEmoji, setGroupEmoji] = useState<string | null>(null);
@@ -50,12 +52,12 @@ export default function CreateGroupScreen() {
 
   const handleCreateGroup = async () => {
     if (!groupName.trim()) {
-      Alert.alert('Error', 'Please enter a group name');
+      showAlert('Error','Please enter a group name');
       return;
     }
 
     if (groupName.length > 64) {
-      Alert.alert('Error', 'Group name must be 64 characters or less');
+      showAlert('Error','Group name must be 64 characters or less');
       return;
     }
 
@@ -64,20 +66,20 @@ export default function CreateGroupScreen() {
 
       if (tokenGateEnabled) {
         if (!tokenMint.trim()) {
-          Alert.alert('Error', 'Please enter a token mint address');
+          showAlert('Error','Please enter a token mint address');
           return;
         }
 
         try {
           new PublicKey(tokenMint);
         } catch {
-          Alert.alert('Error', 'Invalid token mint address');
+          showAlert('Error','Invalid token mint address');
           return;
         }
 
         const balance = parseFloat(minBalance);
         if (isNaN(balance) || balance <= 0) {
-          Alert.alert('Error', 'Please enter a valid minimum balance');
+          showAlert('Error','Please enter a valid minimum balance');
           return;
         }
 
@@ -110,7 +112,7 @@ export default function CreateGroupScreen() {
       }, 2000);
     } catch (error) {
       console.error('Failed to create group:', error);
-      Alert.alert('Error', `Failed to create group: ${error.message}`);
+      showAlert('Error',`Failed to create group: ${error.message}`);
     }
   };
 
@@ -285,6 +287,7 @@ export default function CreateGroupScreen() {
           setEmojiPickerVisible(false);
         }}
       />
+      {DarkAlertComponent}
     </ScrollView>
   );
 }

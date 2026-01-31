@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity, Alert } from 'react-native';
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
 import { TextInput, IconButton, Text, Avatar, Menu, Dialog, Portal, Button } from 'react-native-paper';
 import * as Clipboard from 'expo-clipboard';
 import { PublicKey } from '@solana/web3.js';
@@ -13,9 +13,11 @@ import { getContactCustomName, getCachedDomain, setContactCustomName } from '../
 import ReactionPicker from '../components/ReactionPicker';
 import ChatBackground from '../components/ChatBackground';
 import ContactProfileModal from '../components/ContactProfileModal';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function ChatScreen({ route, navigation }: any) {
   const { contact } = route.params;
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
   const [message, setMessage] = React.useState('');
   const [menuVisible, setMenuVisible] = React.useState<string | null>(null);
   const [deleteMenuVisible, setDeleteMenuVisible] = React.useState<string | null>(null);
@@ -192,7 +194,7 @@ export default function ChatScreen({ route, navigation }: any) {
       setRenameDialogVisible(false);
       setNewName('');
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to rename contact');
+      showAlert('Error', 'Failed to rename contact');
     }
   };
 
@@ -204,7 +206,7 @@ export default function ChatScreen({ route, navigation }: any) {
       await setContactCustomName(wallet.publicKey, pubkey, newName);
       setDisplayName(newName);
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to rename contact');
+      showAlert('Error', 'Failed to rename contact');
     }
   };
 
@@ -215,7 +217,7 @@ export default function ChatScreen({ route, navigation }: any) {
       await setContactCustomName(wallet.publicKey, pubkey, ''); // Clear custom name
       setDisplayName(originalName);
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to reset name');
+      showAlert('Error', 'Failed to reset name');
     }
   };
 
@@ -329,13 +331,13 @@ export default function ChatScreen({ route, navigation }: any) {
 
   const handleCopyMessage = async (content: string) => {
     await Clipboard.setStringAsync(content);
-    Alert.alert('Copied', 'Message copied to clipboard');
+    showAlert('Copied', 'Message copied to clipboard');
     setMenuVisible(null);
   };
 
   const handlePinMessage = (messageId: string) => {
     // TODO: Implement pinning functionality
-    Alert.alert('Coming Soon', 'Message pinning will be added soon');
+    showAlert('Coming Soon', 'Message pinning will be added soon');
     setMenuVisible(null);
   };
 
@@ -685,7 +687,7 @@ export default function ChatScreen({ route, navigation }: any) {
         onRename={handleModalRename}
         onResetName={handleResetName}
         onDeleteContact={() => {
-          Alert.alert(
+          showAlert(
             'Delete Contact',
             `Remove ${displayName} from your contacts? You can re-add them later.`,
             [
@@ -698,7 +700,7 @@ export default function ChatScreen({ route, navigation }: any) {
                     await messenger.deleteContact(new PublicKey(contact.pubkey));
                     navigation.goBack();
                   } catch (error: any) {
-                    Alert.alert('Error', error.message);
+                    showAlert('Error', error.message);
                   }
                 },
               },
@@ -706,7 +708,7 @@ export default function ChatScreen({ route, navigation }: any) {
           );
         }}
         onBlockContact={() => {
-          Alert.alert(
+          showAlert(
             'Block Contact',
             `Block ${displayName}? They won't be able to contact you until unblocked.`,
             [
@@ -719,7 +721,7 @@ export default function ChatScreen({ route, navigation }: any) {
                     await messenger.blockContact(new PublicKey(contact.pubkey));
                     navigation.goBack();
                   } catch (error: any) {
-                    Alert.alert('Error', error.message);
+                    showAlert('Error', error.message);
                   }
                 },
               },
@@ -727,6 +729,7 @@ export default function ChatScreen({ route, navigation }: any) {
           );
         }}
       />
+      {DarkAlertComponent}
     </KeyboardAvoidingView>
   );
 }

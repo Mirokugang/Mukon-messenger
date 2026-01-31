@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { List, Button, Text, Divider, Avatar, Dialog, Portal, TextInput, IconButton } from 'react-native-paper';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { useMessenger } from '../contexts/MessengerContext';
@@ -10,6 +10,7 @@ import EmojiPicker from '../components/EmojiPicker';
 import ContactProfileModal from '../components/ContactProfileModal';
 import { getGroupAvatar, setGroupAvatar, getGroupLocalName, setGroupLocalName, getContactCustomName, getCachedDomain, setContactCustomName } from '../utils/domains';
 import { getUserProfilePDA } from '../utils/transactions';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function GroupInfoScreen() {
   const route = useRoute();
@@ -18,6 +19,7 @@ export default function GroupInfoScreen() {
 
   const messenger = useMessenger();
   const { groups, leaveGroup, kickMember, updateGroup, wallet, loading, connection } = messenger;
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
 
   const [group, setGroup] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -145,7 +147,7 @@ export default function GroupInfoScreen() {
           navigation.goBack();
           navigation.goBack(); // Go back to conversations list
         } catch (error) {
-          Alert.alert('Error', `Failed to leave group: ${error.message}`);
+          showAlert('Error', `Failed to leave group: ${error.message}`);
         }
       },
     });
@@ -161,7 +163,7 @@ export default function GroupInfoScreen() {
           await kickMember(Buffer.from(groupId, 'hex'), memberPubkey);
           // Reload group info
         } catch (error) {
-          Alert.alert('Error', `Failed to kick member: ${error.message}`);
+          showAlert('Error', `Failed to kick member: ${error.message}`);
         }
       },
     });
@@ -187,7 +189,7 @@ export default function GroupInfoScreen() {
       setRenameDialogVisible(false);
       setNewGroupName('');
     } catch (error: any) {
-      Alert.alert('Error', `Failed to rename group: ${error.message}`);
+      showAlert('Error', `Failed to rename group: ${error.message}`);
     }
   };
 
@@ -198,7 +200,7 @@ export default function GroupInfoScreen() {
       setGroupAvatarState(emoji);
       setEmojiPickerVisible(false);
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to set group avatar');
+      showAlert('Error', 'Failed to set group avatar');
     }
   };
 
@@ -217,7 +219,7 @@ export default function GroupInfoScreen() {
         });
       }
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to rename member');
+      showAlert('Error', 'Failed to rename member');
     }
   };
 
@@ -228,7 +230,7 @@ export default function GroupInfoScreen() {
       // Reload member profiles
       // Would need to fetch on-chain name again, for now just keep existing
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to reset name');
+      showAlert('Error', 'Failed to reset name');
     }
   };
 
@@ -476,14 +478,14 @@ export default function GroupInfoScreen() {
           onAddContact={async () => {
             try {
               await messenger.invite(new PublicKey(selectedMember.pubkey));
-              Alert.alert('Success', 'Contact invitation sent');
+              showAlert('Success', 'Contact invitation sent');
               setProfileModalVisible(false);
             } catch (error: any) {
-              Alert.alert('Error', 'Failed to send invitation');
+              showAlert('Error', 'Failed to send invitation');
             }
           }}
           onDeleteContact={async () => {
-            Alert.alert(
+            showAlert(
               'Delete Contact',
               `Remove ${selectedMember.displayName} from your contacts?`,
               [
@@ -494,10 +496,10 @@ export default function GroupInfoScreen() {
                   onPress: async () => {
                     try {
                       await messenger.deleteContact(new PublicKey(selectedMember.pubkey));
-                      Alert.alert('Success', 'Contact deleted');
+                      showAlert('Success', 'Contact deleted');
                       setProfileModalVisible(false);
                     } catch (error: any) {
-                      Alert.alert('Error', error.message);
+                      showAlert('Error', error.message);
                     }
                   },
                 },
@@ -505,7 +507,7 @@ export default function GroupInfoScreen() {
             );
           }}
           onBlockContact={async () => {
-            Alert.alert(
+            showAlert(
               'Block Contact',
               `Block ${selectedMember.displayName}?`,
               [
@@ -516,10 +518,10 @@ export default function GroupInfoScreen() {
                   onPress: async () => {
                     try {
                       await messenger.blockContact(new PublicKey(selectedMember.pubkey));
-                      Alert.alert('Success', 'Contact blocked');
+                      showAlert('Success', 'Contact blocked');
                       setProfileModalVisible(false);
                     } catch (error: any) {
-                      Alert.alert('Error', error.message);
+                      showAlert('Error', error.message);
                     }
                   },
                 },
@@ -558,6 +560,7 @@ export default function GroupInfoScreen() {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+      {DarkAlertComponent}
     </ScrollView>
   );
 }

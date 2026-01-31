@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { View, FlatList, StyleSheet, Alert } from 'react-native';
+import { View, FlatList, StyleSheet } from 'react-native';
 import { List, Checkbox, Button, Text, Searchbar } from 'react-native-paper';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { useMessenger } from '../contexts/MessengerContext';
 import { PublicKey } from '@solana/web3.js';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function InviteMemberScreen() {
   const route = useRoute();
@@ -11,6 +12,7 @@ export default function InviteMemberScreen() {
   const { groupId, groupName } = route.params as { groupId: string; groupName: string };
 
   const { contacts, inviteToGroup, loading } = useMessenger();
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
 
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
@@ -41,7 +43,7 @@ export default function InviteMemberScreen() {
 
   const handleInvite = async () => {
     if (selectedContacts.size === 0) {
-      Alert.alert('Error', 'Please select at least one contact');
+      showAlert('Error','Please select at least one contact');
       return;
     }
 
@@ -54,14 +56,14 @@ export default function InviteMemberScreen() {
         await inviteToGroup(groupIdBytes, pubkey);
       }
 
-      Alert.alert(
+      showAlert(
         'Success',
         `Invited ${selectedContacts.size} member(s) to ${groupName}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (error) {
       console.error('Failed to invite members:', error);
-      Alert.alert('Error', `Failed to invite members: ${error.message}`);
+      showAlert('Error',`Failed to invite members: ${error.message}`);
     }
   };
 
@@ -132,6 +134,7 @@ export default function InviteMemberScreen() {
           Send Invites
         </Button>
       </View>
+      {DarkAlertComponent}
     </View>
   );
 }

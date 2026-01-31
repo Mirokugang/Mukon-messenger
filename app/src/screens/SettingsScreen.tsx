@@ -1,19 +1,21 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { List, Text, Button, Portal, Dialog, Divider } from 'react-native-paper';
 import { theme } from '../theme';
 import { useMessenger } from '../contexts/MessengerContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useNavigation } from '@react-navigation/native';
+import { useDarkAlert } from '../components/DarkAlert';
 
 export default function SettingsScreen() {
   const messenger = useMessenger();
   const wallet = useWallet();
   const navigation = useNavigation();
+  const { showAlert, DarkAlertComponent } = useDarkAlert();
   const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
 
   const handleCloseProfile = () => {
-    Alert.alert(
+    showAlert(
       '⚠️ Warning: Destructive Action',
       'This will permanently delete your profile account and return the rent to your wallet.\n\n' +
       'You will need to re-register to use Mukon again.\n\n' +
@@ -29,7 +31,7 @@ export default function SettingsScreen() {
               await messenger.closeProfile();
               setDeleteDialogVisible(false);
 
-              Alert.alert(
+              showAlert(
                 'Profile Closed',
                 'Your profile has been deleted and rent returned to your wallet. You can now re-register with updated account schema.',
                 [
@@ -44,7 +46,7 @@ export default function SettingsScreen() {
               );
             } catch (error: any) {
               setDeleteDialogVisible(false);
-              Alert.alert('Error', `Failed to close profile: ${error.message}`);
+              showAlert('Error', `Failed to close profile: ${error.message}`);
             }
           },
         },
@@ -84,7 +86,7 @@ export default function SettingsScreen() {
           left={(props) => <List.Icon {...props} icon="account-cancel" />}
           onPress={() => {
             // TODO: Navigate to blocked contacts screen
-            Alert.alert('Coming Soon', 'Blocked contacts management');
+            showAlert('Coming Soon', 'Blocked contacts management');
           }}
           style={styles.listItem}
         />
@@ -119,7 +121,7 @@ export default function SettingsScreen() {
           description="DGAPfs1...HbySabv"
           left={(props) => <List.Icon {...props} icon="code-braces" />}
           onPress={() => {
-            Alert.alert(
+            showAlert(
               'Program ID',
               'DGAPfs1DAjt5p5J5Z5trtgCeFBWMfh2mck2ZqHbySabv\n\nRunning on Solana Devnet'
             );
@@ -164,6 +166,7 @@ export default function SettingsScreen() {
           </Dialog.Content>
         </Dialog>
       </Portal>
+      {DarkAlertComponent}
     </ScrollView>
   );
 }

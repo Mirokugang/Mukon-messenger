@@ -1413,7 +1413,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         return updated;
       });
 
-      // Build array of instructions: create + all invites
+      // Prepare admin's encrypted key for on-chain storage (moved up to combine into one tx)
+      const adminNonce = nacl.randomBytes(nacl.box.nonceLength);
+      const adminEncryptedKey = nacl.box(
+        groupSecret,
+        adminNonce,
+        encryptionKeys.publicKey,
+        encryptionKeys.secretKey
+      );
+
+      // Build array of instructions: create + invites + store key (FIX: combined into ONE transaction)
       const instructions = [
         createCreateGroupInstruction(
           wallet.publicKey,
@@ -1424,6 +1433,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         ),
         ...invitees.map(invitee =>
           createInviteToGroupInstruction(wallet.publicKey, groupId, invitee)
+        ),
+        createStoreGroupKeyInstruction(
+          wallet.publicKey,
+          groupId,
+          adminEncryptedKey,
+          adminNonce
         )
       ];
 
@@ -1435,39 +1450,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
       await loadGroups();
 
-      console.log(`✅ Group created with ${invitees.length} invites:`, groupIdHex);
+      console.log(`✅ Group created with ${invitees.length} invites (single signature):`, groupIdHex);
+      console.log(`💾 Admin's encrypted group key stored on-chain`);
 
-      // Store admin's own encrypted key share on-chain for recovery
-      try {
-        const adminNonce = nacl.randomBytes(nacl.box.nonceLength);
-        const adminEncryptedKey = nacl.box(
-          groupSecret,
-          adminNonce,
-          encryptionKeys.publicKey,
-          encryptionKeys.secretKey
-        );
-
-        const storeKeyIx = createStoreGroupKeyInstruction(
-          wallet.publicKey,
-          groupId,
-          adminEncryptedKey,
-          adminNonce
-        );
-
-        const storeKeyTx = await buildTransaction(connection, wallet.publicKey, [storeKeyIx]);
-        const signedStoreKeyTx = await wallet.signTransaction(storeKeyTx);
-        const storeKeySig = await connection.sendTransaction(signedStoreKeyTx);
-        await connection.confirmTransaction(storeKeySig, 'confirmed');
-
-        console.log(`💾 Stored admin's encrypted group key on-chain`);
-
-        // Mark as backed up so GroupChatScreen doesn't re-store
-        const backupKey = `groupKeyBackedUp_${wallet.publicKey.toBase58()}_${groupIdHex}`;
-        await AsyncStorage.setItem(backupKey, 'true');
-      } catch (err) {
-        console.error('Failed to store admin group key on-chain:', err);
-        // Non-fatal - local key still works
-      }
+      // Mark as backed up so GroupChatScreen doesn't re-store
+      const backupKey = `groupKeyBackedUp_${wallet.publicKey.toBase58()}_${groupIdHex}`;
+      await AsyncStorage.setItem(backupKey, 'true');
 
       // Share group key with all invitees via Socket.IO
       if (socket && encryptionKeys) {
