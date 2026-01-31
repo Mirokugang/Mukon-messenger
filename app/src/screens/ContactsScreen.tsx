@@ -762,6 +762,20 @@ export default function ContactsScreen({ navigation }: any) {
           <Dialog.Actions>
             <Button onPress={() => setRenameDialogVisible(false)}>Cancel</Button>
             <Button
+              onPress={async () => {
+                if (!renamingContact || !wallet.publicKey) return;
+                const pubkey = new PublicKey(renamingContact.pubkey);
+                await setContactCustomName(wallet.publicKey, pubkey, '');
+                setRenameDialogVisible(false);
+                setRenamingContact(null);
+                setNewName('');
+                setRefreshKey(prev => prev + 1);
+              }}
+              textColor={theme.colors.textSecondary}
+            >
+              Reset
+            </Button>
+            <Button
               onPress={handleRename}
               mode="contained"
               buttonColor={theme.colors.primary}

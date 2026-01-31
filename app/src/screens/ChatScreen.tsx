@@ -640,6 +640,19 @@ export default function ChatScreen({ route, navigation }: any) {
           <Dialog.Actions>
             <Button onPress={() => setRenameDialogVisible(false)}>Cancel</Button>
             <Button
+              onPress={async () => {
+                if (!wallet.publicKey) return;
+                const pubkey = new PublicKey(contact.pubkey);
+                await setContactCustomName(wallet.publicKey, pubkey, '');
+                setDisplayName(originalName);
+                setRenameDialogVisible(false);
+                setNewName('');
+              }}
+              textColor={theme.colors.textSecondary}
+            >
+              Reset
+            </Button>
+            <Button
               onPress={handleRename}
               mode="contained"
               buttonColor={theme.colors.primary}
