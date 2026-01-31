@@ -65,6 +65,7 @@ interface MessengerContextType {
   contacts: Contact[];
   messages: Map<string, any[]>;
   unreadCounts: Map<string, number>;
+  readTimestamps: Map<string, number>;
   loading: boolean;
   encryptionReady: boolean;
   // DM methods
@@ -105,6 +106,8 @@ interface MessengerContextType {
   loadGroupMessages: (groupId: string) => Promise<void>;
   joinGroupRoom: (groupId: string) => void;
   leaveGroupRoom: (groupId: string) => void;
+  groupAvatars: Map<string, string>;
+  setGroupAvatarShared: (groupId: string, emoji: string) => Promise<void>;
   wallet: WalletContextType | null;
 }
 
@@ -139,6 +142,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   const [groupMessages, setGroupMessages] = useState<Map<string, any[]>>(new Map());
   const [groupKeys, setGroupKeys] = useState<Map<string, Uint8Array>>(new Map()); // groupId -> symmetric key
   const [activeGroupRoom, setActiveGroupRoom] = useState<string | null>(null);
+  const [readTimestamps, setReadTimestamps] = useState<Map<string, number>>(new Map()); // conversationId/groupId -> latest read timestamp
+  const [groupAvatars, setGroupAvatars] = useState<Map<string, string>>(new Map()); // groupId -> emoji (Fix 4)
 
   // Refs for socket handlers to avoid stale closures (Fix 2b, 2d)
   const encryptionKeysRef = useRef<nacl.BoxKeyPair | null>(null);
@@ -212,6 +217,26 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     persistUnreadCounts();
   }, [unreadCounts, wallet?.publicKey]);
 
+  // Persist read timestamps to AsyncStorage (Fix 8)
+  useEffect(() => {
+    if (!wallet?.publicKey) return;
+    if (!hasLoadedPersistedKeys.current) return; // Use same guard
+
+    const persistReadTimestamps = async () => {
+      try {
+        const timestampsArray = Array.from(readTimestamps.entries());
+        await AsyncStorage.setItem(
+          `readTimestamps_${wallet.publicKey.toBase58()}`,
+          JSON.stringify(timestampsArray)
+        );
+      } catch (error) {
+        console.error('Failed to persist read timestamps:', error);
+      }
+    };
+
+    persistReadTimestamps();
+  }, [readTimestamps, wallet?.publicKey]);
+
   // Load persisted group keys on mount (Fix 2e)
   useEffect(() => {
     if (!wallet?.publicKey) return;
@@ -239,6 +264,15 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           const countsMap = new Map(countsArray);
           setUnreadCounts(countsMap);
           console.log(`✅ Loaded ${countsMap.size} persisted unread counts`);
+        }
+
+        // Load read timestamps (Fix 8)
+        const storedTimestamps = await AsyncStorage.getItem(`readTimestamps_${wallet.publicKey.toBase58()}`);
+        if (storedTimestamps) {
+          const timestampsArray = JSON.parse(storedTimestamps);
+          const timestampsMap = new Map(timestampsArray);
+          setReadTimestamps(timestampsMap);
+          console.log(`✅ Loaded ${timestampsMap.size} persisted read timestamps`);
         }
       } catch (error) {
         console.error('Failed to load persisted data:', error);
@@ -479,11 +513,22 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     newSocket.on('messages_read', ({ conversationId, readerPubkey, latestTimestamp }) => {
       if (readerPubkey === wallet?.publicKey?.toBase58()) return; // Ignore own read receipts
 
+      // Update read timestamps for persistence
+      setReadTimestamps(prev => {
+        const updated = new Map(prev);
+        const existing = updated.get(conversationId) || 0;
+        if (latestTimestamp > existing) {
+          updated.set(conversationId, latestTimestamp);
+        }
+        return updated;
+      });
+
+      // Update in-memory message statuses
       setMessages((prev) => {
         const updated = new Map(prev);
         const conversationMessages = updated.get(conversationId) || [];
         const updatedMessages = conversationMessages.map(m => {
-          if (m.sender === wallet?.publicKey?.toBase58() && m.timestamp <= latestTimestamp) {
+          if (m.sender === wallet?.publicKey?.toBase58() && new Date(m.timestamp).getTime() <= latestTimestamp) {
             return { ...m, status: 'read' };
           }
           return m;
@@ -564,11 +609,22 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     newSocket.on('group_messages_read', ({ groupId, readerPubkey, latestTimestamp }) => {
       if (readerPubkey === wallet?.publicKey?.toBase58()) return; // Ignore own read receipts
 
+      // Update read timestamps for persistence
+      setReadTimestamps(prev => {
+        const updated = new Map(prev);
+        const existing = updated.get(groupId) || 0;
+        if (latestTimestamp > existing) {
+          updated.set(groupId, latestTimestamp);
+        }
+        return updated;
+      });
+
+      // Update in-memory message statuses
       setGroupMessages((prev) => {
         const updated = new Map(prev);
         const groupMsgs = updated.get(groupId) || [];
         const updatedMessages = groupMsgs.map(m => {
-          if (m.sender === wallet?.publicKey?.toBase58() && m.timestamp <= latestTimestamp) {
+          if (m.sender === wallet?.publicKey?.toBase58() && new Date(m.timestamp).getTime() <= latestTimestamp) {
             return { ...m, status: 'read' };
           }
           return m;
@@ -646,6 +702,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           console.error('❌ Failed to decrypt group key:', error);
         }
       }
+    });
+
+    // Group avatar handler (Fix 4)
+    newSocket.on('group_avatar_updated', ({ groupId, avatar }) => {
+      console.log(`🎨 Group avatar updated for ${groupId.slice(0, 8)}... to ${avatar}`);
+      setGroupAvatars(prev => {
+        const updated = new Map(prev);
+        updated.set(groupId, avatar);
+        return updated;
+      });
     });
 
     setSocket(newSocket);
@@ -1093,7 +1159,17 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
       setMessages((prev) => {
         const updated = new Map(prev);
-        updated.set(conversationId, data.messages);
+        const backendMessages = data.messages;
+        // Preserve local status fields from existing messages
+        const existingMessages = prev.get(conversationId) || [];
+        const existingStatusMap = new Map(
+          existingMessages.filter(m => m.status).map(m => [m.id, m.status])
+        );
+        const merged = backendMessages.map(msg => ({
+          ...msg,
+          status: existingStatusMap.get(msg.id) || (msg.sender === wallet?.publicKey?.toBase58() ? 'sent' : undefined),
+        }));
+        updated.set(conversationId, merged);
         return updated;
       });
     } catch (error) {
@@ -1352,6 +1428,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         await connection.confirmTransaction(storeKeySig, 'confirmed');
 
         console.log(`💾 Stored admin's encrypted group key on-chain`);
+
+        // Mark as backed up so GroupChatScreen doesn't re-store
+        const backupKey = `groupKeyBackedUp_${wallet.publicKey.toBase58()}_${groupIdHex}`;
+        await AsyncStorage.setItem(backupKey, 'true');
       } catch (err) {
         console.error('Failed to store admin group key on-chain:', err);
         // Non-fatal - local key still works
@@ -1938,7 +2018,17 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
       setGroupMessages(prev => {
         const updated = new Map(prev);
-        updated.set(groupId, data.messages);
+        const backendMessages = data.messages;
+        // Preserve local status fields from existing messages
+        const existingMessages = prev.get(groupId) || [];
+        const existingStatusMap = new Map(
+          existingMessages.filter(m => m.status).map(m => [m.id, m.status])
+        );
+        const merged = backendMessages.map(msg => ({
+          ...msg,
+          status: existingStatusMap.get(msg.id) || (msg.sender === wallet?.publicKey?.toBase58() ? 'sent' : undefined),
+        }));
+        updated.set(groupId, merged);
         return updated;
       });
     } catch (error) {
@@ -1956,6 +2046,17 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         const updated = new Map(prev);
         updated.delete(groupId);
         return updated;
+      });
+
+      // Fetch group avatar (Fix 4)
+      socket.emit('get_group_avatar', { groupId }, (avatar: string | null) => {
+        if (avatar) {
+          setGroupAvatars(prev => {
+            const updated = new Map(prev);
+            updated.set(groupId, avatar);
+            return updated;
+          });
+        }
       });
 
       // Emit read receipts for latest group message (Feature 5)
@@ -1981,6 +2082,21 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     }
   };
 
+  const setGroupAvatarShared = async (groupId: string, emoji: string) => {
+    if (!socket || !wallet?.publicKey) return;
+
+    // Save locally
+    setGroupAvatars(prev => {
+      const updated = new Map(prev);
+      updated.set(groupId, emoji);
+      return updated;
+    });
+
+    // Emit to backend
+    socket.emit('set_group_avatar', { groupId, avatar: emoji });
+    console.log(`🎨 Setting group avatar for ${groupId.slice(0, 8)}... to ${emoji}`);
+  };
+
   const value: MessengerContextType = {
     connection,
     socket,
@@ -1988,6 +2104,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     contacts,
     messages,
     unreadCounts,
+    readTimestamps,
     loading,
     encryptionReady,
     register,
@@ -2027,6 +2144,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     loadGroupMessages,
     joinGroupRoom,
     leaveGroupRoom,
+    groupAvatars,
+    setGroupAvatarShared,
     wallet,
   };
 

@@ -53,6 +53,15 @@ export default function ChatScreen({ route, navigation }: any) {
   // Get messages for this conversation
   const conversationMessages = messenger.messages.get(conversationId) || [];
 
+  // Helper to derive message status from both msg.status and readTimestamps (Fix 8)
+  const getMessageStatus = (msg: any): 'sending' | 'sent' | 'read' | null => {
+    if (msg.sender !== wallet.publicKey?.toBase58()) return null; // Only for outgoing messages
+    if (msg.status === 'read') return 'read';
+    const readTs = messenger.readTimestamps.get(conversationId);
+    if (readTs && new Date(msg.timestamp).getTime() <= readTs) return 'read';
+    return msg.status || 'sent';
+  };
+
   const messages = conversationMessages.map((msg: any, idx: number) => {
     const isMe = msg.sender === wallet.publicKey?.toBase58();
     const isSystem = msg.type === 'system';
@@ -138,7 +147,7 @@ export default function ChatScreen({ route, navigation }: any) {
       replyTo: msg.replyTo,
       repliedToContent,
       reactions: msg.reactions || {},
-      status: msg.status || null, // Feature 5: sent/read status
+      status: getMessageStatus(msg), // Feature 5: sent/read status (Fix 8: with readTimestamps)
     };
   });
 

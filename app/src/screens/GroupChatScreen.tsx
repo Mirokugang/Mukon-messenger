@@ -55,6 +55,7 @@ export default function GroupChatScreen() {
   const [renameDialogVisible, setRenameDialogVisible] = useState(false);
   const [newName, setNewName] = useState('');
   const flatListRef = useRef<FlatList>(null);
+  const hasAttemptedBackup = useRef<Set<string>>(new Set());
 
   // Get current group
   const currentGroup = useMemo(() => {
@@ -163,6 +164,10 @@ export default function GroupChatScreen() {
     if (!wallet?.publicKey || !wallet.signTransaction) return;
 
     const storeGroupKeyOnChain = async () => {
+      // Session-level guard to prevent re-runs
+      if (hasAttemptedBackup.current.has(groupId)) return;
+      hasAttemptedBackup.current.add(groupId);
+
       try {
         // Check if we have the group key locally
         const groupKey = groupKeys.get(groupId);
@@ -225,7 +230,7 @@ export default function GroupChatScreen() {
     };
 
     storeGroupKeyOnChain();
-  }, [groupId, wallet, groupKeys, connection]);
+  }, [groupId]);
 
   // Load messages and join room on mount
   useFocusEffect(
@@ -243,6 +248,15 @@ export default function GroupChatScreen() {
   useEffect(() => {
     const msgs = groupMessages.get(groupId) || [];
     const groupKey = groupKeys.get(groupId);
+
+    // Helper to derive message status from both msg.status and readTimestamps (Fix 8)
+    const getMessageStatus = (msg: any): 'sending' | 'sent' | 'read' | null => {
+      if (msg.sender !== wallet?.publicKey?.toBase58()) return null; // Only for outgoing messages
+      if (msg.status === 'read') return 'read';
+      const readTs = messenger.readTimestamps.get(groupId);
+      if (readTs && new Date(msg.timestamp).getTime() <= readTs) return 'read';
+      return msg.status || 'sent';
+    };
 
     // Decrypt messages
     const decryptedMessages = msgs.map((msg, idx) => {
@@ -300,7 +314,7 @@ export default function GroupChatScreen() {
         replyTo: msg.replyTo,
         repliedToContent,
         reactions: msg.reactions || {},
-        status: msg.status || null, // Feature 5: sent/read status
+        status: getMessageStatus(msg), // Feature 5: sent/read status (Fix 8: with readTimestamps)
       };
     });
 

@@ -26,31 +26,15 @@ export default function ContactsScreen({ navigation }: any) {
   const [newName, setNewName] = React.useState('');
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [filter, setFilter] = React.useState<FilterType>('All');
-  const [groupAvatars, setGroupAvatars] = React.useState<Map<string, string>>(new Map());
   const [selectedContactForProfile, setSelectedContactForProfile] = React.useState<any>(null);
   const [profileModalVisible, setProfileModalVisible] = React.useState(false);
   const displayNames = useContactNames(wallet.publicKey, messenger.contacts);
 
-  // Refresh display names and load group avatars when screen comes into focus
+  // Refresh display names when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       setRefreshKey(prev => prev + 1);
-
-      // Load all group avatars
-      const loadGroupAvatars = async () => {
-        if (!wallet.publicKey) return;
-        const avatars = new Map<string, string>();
-        for (const group of messenger.groups) {
-          const groupIdHex = Buffer.from(group.groupId).toString('hex');
-          const avatar = await getGroupAvatar(wallet.publicKey, groupIdHex);
-          if (avatar) {
-            avatars.set(groupIdHex, avatar);
-          }
-        }
-        setGroupAvatars(avatars);
-      };
-      loadGroupAvatars();
-    }, [messenger.groups])
+    }, [])
   );
 
   // Register user if not already registered
@@ -178,7 +162,7 @@ export default function ContactsScreen({ navigation }: any) {
                 title={item.displayName}
                 description={item.lastMessage || `${group.members.length} members`}
                 left={(props) => {
-                  const avatar = groupAvatars.get(item.id);
+                  const avatar = messenger.groupAvatars.get(item.id);
                   return avatar ? (
                     <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center' }}>
                       <Text style={{ fontSize: 32 }}>{avatar}</Text>

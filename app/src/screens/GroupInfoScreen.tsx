@@ -38,8 +38,16 @@ export default function GroupInfoScreen() {
     // Load group avatar and local name
     const loadLocalData = async () => {
       if (!wallet?.publicKey) return;
-      const avatar = await getGroupAvatar(wallet.publicKey, groupId);
-      setGroupAvatarState(avatar);
+
+      // Use shared avatar from messenger context first (Fix 4)
+      const sharedAvatar = messenger.groupAvatars.get(groupId);
+      if (sharedAvatar) {
+        setGroupAvatarState(sharedAvatar);
+      } else {
+        // Fallback to local storage
+        const avatar = await getGroupAvatar(wallet.publicKey, groupId);
+        setGroupAvatarState(avatar);
+      }
 
       const localName = await getGroupLocalName(wallet.publicKey, groupId);
       setLocalGroupNameState(localName);
@@ -126,7 +134,7 @@ export default function GroupInfoScreen() {
   const handleEmojiSelect = async (emoji: string) => {
     if (!wallet?.publicKey) return;
     try {
-      await setGroupAvatar(wallet.publicKey, groupId, emoji);
+      await messenger.setGroupAvatarShared(groupId, emoji);
       setGroupAvatarState(emoji);
       setEmojiPickerVisible(false);
     } catch (error: any) {

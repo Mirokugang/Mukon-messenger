@@ -29,6 +29,7 @@ const onlineUsers = new Map(); // pubkey -> socket.id
 const groupMessages = new Map(); // groupId -> Message[]
 const groupRooms = new Map(); // groupId -> Set<socket.id>
 const pendingKeyShares = new Map(); // groupId -> Map<recipientPubkey, { encryptedKey, nonce, senderPubkey }>
+const groupAvatars = new Map(); // groupId -> emoji string (Fix 4)
 
 // Verify wallet signature
 function verifySignature(publicKey, message, signature) {
@@ -458,6 +459,25 @@ io.on('connection', (socket) => {
     } else {
       console.log(`⚠️ No pending key share found for ${socket.publicKey.slice(0, 8)}... in group ${groupId.slice(0, 8)}...`);
     }
+  });
+
+  // Group avatar handlers (Fix 4)
+  socket.on('set_group_avatar', ({ groupId, avatar }) => {
+    if (!socket.publicKey) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    groupAvatars.set(groupId, avatar);
+    console.log(`🎨 Group avatar set for ${groupId.slice(0, 8)}... to ${avatar}`);
+
+    // Broadcast to all group members
+    socket.to(`group_${groupId}`).emit('group_avatar_updated', { groupId, avatar });
+  });
+
+  socket.on('get_group_avatar', ({ groupId }, callback) => {
+    const avatar = groupAvatars.get(groupId) || null;
+    if (callback) callback(avatar);
   });
 
   socket.on('add_group_reaction', ({ groupId, messageId, emoji, userId }) => {
