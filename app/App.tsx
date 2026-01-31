@@ -11,6 +11,7 @@ import { MessengerProvider } from './src/contexts/MessengerContext';
 import { AlertProvider } from './src/contexts/AlertContext';
 import WalletConnectScreen from './src/screens/WalletConnectScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
+import ContactsListScreen from './src/screens/ContactsListScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import AddContactScreen from './src/screens/AddContactScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
@@ -99,6 +100,11 @@ function AppNavigator() {
             name="AddContact"
             component={AddContactScreen}
             options={{ title: 'Add Contact' }}
+          />
+          <Stack.Screen
+            name="ContactsList"
+            component={ContactsListScreen}
+            options={{ title: 'Contacts' }}
           />
           <Stack.Screen
             name="Profile"

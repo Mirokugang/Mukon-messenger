@@ -53,7 +53,7 @@ export default function CustomDrawer({ navigation }: any) {
       <List.Item
         title="Contacts"
         left={(props) => <List.Icon {...props} icon="account-multiple" color={theme.colors.primary} />}
-        onPress={() => navigation.navigate('Contacts')}
+        onPress={() => navigation.navigate('ContactsList')}
         titleStyle={styles.menuItem}
       />
 

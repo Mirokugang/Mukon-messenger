@@ -1,0 +1,233 @@
+import React, { useMemo } from 'react';
+import { View, SectionList, StyleSheet, TouchableOpacity } from 'react-native';
+import { Searchbar, List, Avatar, Text, Button, Divider } from 'react-native-paper';
+import { PublicKey } from '@solana/web3.js';
+import { Buffer } from 'buffer';
+import { theme } from '../theme';
+import { useWallet } from '../contexts/WalletContext';
+import { useMessenger } from '../contexts/MessengerContext';
+import { useContactNames } from '../hooks/useContactNames';
+import { getChatHash } from '../utils/encryption';
+
+export default function ContactsListScreen({ navigation }: any) {
+  const wallet = useWallet();
+  const messenger = useMessenger();
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const displayNames = useContactNames(wallet.publicKey, messenger.contacts);
+
+  // Filter and sort contacts
+  const acceptedContacts = messenger.contacts.filter(c => c.state === 'Accepted');
+
+  // Get display names and sort alphabetically
+  const sortedContacts = useMemo(() => {
+    return acceptedContacts
+      .map(contact => {
+        const pubkeyStr = contact.publicKey.toBase58();
+        const displayName = displayNames[pubkeyStr] || pubkeyStr;
+        return {
+          pubkey: pubkeyStr,
+          displayName,
+          avatar: contact.avatarUrl || '',
+          publicKeyObj: contact.publicKey,
+        };
+      })
+      .filter(contact => {
+        if (!searchQuery.trim()) return true;
+        return contact.displayName.toLowerCase().includes(searchQuery.toLowerCase());
+      })
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [acceptedContacts, displayNames, searchQuery]);
+
+  // Group contacts by first letter
+  const sections = useMemo(() => {
+    const grouped = new Map<string, typeof sortedContacts>();
+
+    sortedContacts.forEach(contact => {
+      const firstLetter = contact.displayName[0]?.toUpperCase() || '#';
+      const letter = /[A-Z]/.test(firstLetter) ? firstLetter : '#';
+
+      if (!grouped.has(letter)) {
+        grouped.set(letter, []);
+      }
+      grouped.get(letter)!.push(contact);
+    });
+
+    return Array.from(grouped.entries())
+      .sort((a, b) => {
+        // '#' goes last
+        if (a[0] === '#') return 1;
+        if (b[0] === '#') return -1;
+        return a[0].localeCompare(b[0]);
+      })
+      .map(([letter, data]) => ({
+        title: letter,
+        data,
+      }));
+  }, [sortedContacts]);
+
+  const handleContactPress = (contact: any) => {
+    const conversationId = wallet.publicKey
+      ? Buffer.from(getChatHash(wallet.publicKey, contact.publicKeyObj)).toString('hex')
+      : '';
+
+    navigation.navigate('Chat', {
+      contact: {
+        pubkey: contact.pubkey,
+        displayName: contact.displayName,
+        avatar: contact.avatar,
+      },
+      conversationId,
+    });
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Search Bar */}
+      <Searchbar
+        placeholder="Search contacts..."
+        onChangeText={setSearchQuery}
+        value={searchQuery}
+        style={styles.searchbar}
+      />
+
+      {/* Action Buttons */}
+      <View style={styles.actionsContainer}>
+        <Button
+          mode="contained"
+          icon="account-group"
+          onPress={() => navigation.navigate('CreateGroup')}
+          style={styles.actionButton}
+        >
+          New Group
+        </Button>
+        <Button
+          mode="outlined"
+          icon="account-plus"
+          onPress={() => navigation.navigate('AddContact')}
+          style={styles.actionButton}
+        >
+          Find by Wallet Address
+        </Button>
+      </View>
+
+      <Divider style={styles.divider} />
+
+      {/* Contacts List */}
+      {sortedContacts.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No contacts found</Text>
+          <Button
+            mode="contained"
+            onPress={() => navigation.navigate('AddContact')}
+            style={styles.addFirstContactButton}
+          >
+            Add Your First Contact
+          </Button>
+        </View>
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.pubkey}
+          renderItem={({ item }) => (
+            <TouchableOpacity onPress={() => handleContactPress(item)}>
+              <List.Item
+                title={item.displayName}
+                left={(props) => (
+                  item.avatar && Array.from(item.avatar).length === 1 ? (
+                    <View style={styles.avatarContainer}>
+                      <Text style={styles.avatarEmoji}>{item.avatar}</Text>
+                    </View>
+                  ) : (
+                    <Avatar.Text
+                      {...props}
+                      size={48}
+                      label={item.displayName[0]?.toUpperCase() || '?'}
+                      style={{ backgroundColor: theme.colors.primary }}
+                    />
+                  )
+                )}
+                style={styles.contactItem}
+              />
+            </TouchableOpacity>
+          )}
+          renderSectionHeader={({ section: { title } }) => (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionHeaderText}>{title}</Text>
+            </View>
+          )}
+          stickySectionHeadersEnabled
+          style={styles.list}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  searchbar: {
+    margin: 12,
+    elevation: 0,
+    backgroundColor: theme.colors.surface,
+  },
+  actionsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    gap: 8,
+    marginBottom: 12,
+  },
+  actionButton: {
+    flex: 1,
+  },
+  divider: {
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  list: {
+    flex: 1,
+  },
+  sectionHeader: {
+    backgroundColor: theme.colors.surface,
+    paddingVertical: 4,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.surfaceVariant,
+  },
+  sectionHeaderText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.primary,
+  },
+  contactItem: {
+    backgroundColor: theme.colors.background,
+  },
+  avatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  avatarEmoji: {
+    fontSize: 32,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  addFirstContactButton: {
+    marginTop: 8,
+  },
+});
