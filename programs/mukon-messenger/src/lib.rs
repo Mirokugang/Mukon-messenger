@@ -2,8 +2,17 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Token, TokenAccount};
 use sha2::{Digest, Sha256};
 use arcium_anchor::prelude::*;
+use arcium_client::idl::arcium::types::{CircuitSource, OffChainCircuitSource};
+use arcium_macros::{circuit_hash, comp_def_offset};
 
 declare_id!("GCTzU7Y6yaBNzW6WA1EJR6fnY9vLNZEEPcgsydCD8mpj");
+
+// Arcium MPC computation definition offsets
+const COMP_DEF_OFFSET_IS_ACCEPTED_CONTACT: u32 = comp_def_offset!("is_accepted_contact");
+const COMP_DEF_OFFSET_COUNT_ACCEPTED: u32 = comp_def_offset!("count_accepted");
+const COMP_DEF_OFFSET_ADD_TWO_NUMBERS: u32 = comp_def_offset!("add_two_numbers");
+
+const SIGN_PDA_SEED: [u8; 20] = *b"ArciumSignerAccount";
 
 #[error_code]
 pub enum ErrorCode {
@@ -35,6 +44,10 @@ pub enum ErrorCode {
     InvalidTokenAccount,
     #[msg("Unauthorized")]
     Unauthorized,
+    #[msg("Computation aborted")]
+    AbortedComputation,
+    #[msg("Cluster not set")]
+    ClusterNotSet,
 }
 
 // Deterministic hash function for chat PDAs
@@ -672,6 +685,177 @@ pub mod mukon_messenger {
 
         Ok(())
     }
+
+    // ========== ARCIUM MPC INSTRUCTIONS ==========
+
+    /// Initialize computation definition for is_accepted_contact circuit
+    pub fn init_is_accepted_contact_comp_def(ctx: Context<InitIsAcceptedContactCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://mukon-circuits.fly.dev/is_accepted_contact.arcis".to_string(),
+                hash: circuit_hash!("is_accepted_contact"),
+            })),
+            None,
+        )?;
+        msg!("Initialized comp def: is_accepted_contact");
+        Ok(())
+    }
+
+    /// Initialize computation definition for count_accepted circuit
+    pub fn init_count_accepted_comp_def(ctx: Context<InitCountAcceptedCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://mukon-circuits.fly.dev/count_accepted.arcis".to_string(),
+                hash: circuit_hash!("count_accepted"),
+            })),
+            None,
+        )?;
+        msg!("Initialized comp def: count_accepted");
+        Ok(())
+    }
+
+    /// Initialize computation definition for add_two_numbers circuit (demo)
+    pub fn init_add_two_numbers_comp_def(ctx: Context<InitAddTwoNumbersCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://mukon-circuits.fly.dev/add_two_numbers.arcis".to_string(),
+                hash: circuit_hash!("add_two_numbers"),
+            })),
+            None,
+        )?;
+        msg!("Initialized comp def: add_two_numbers");
+        Ok(())
+    }
+
+    /// Queue MPC computation to check if a contact is accepted
+    pub fn check_is_contact(
+        ctx: Context<CheckIsContact>,
+        computation_offset: u64,
+        encrypted_contact_list: Vec<u8>,
+        encrypted_query_pubkey: Vec<u8>,
+        pub_key: [u8; 32],
+        nonce_list: u128,
+        nonce_query: u128,
+    ) -> Result<()> {
+        let args = ArgBuilder::new()
+            .x25519_pubkey(pub_key)
+            .plaintext_u128(nonce_list)
+            .encrypted_bytes(encrypted_contact_list)
+            .x25519_pubkey(pub_key)
+            .plaintext_u128(nonce_query)
+            .encrypted_bytes(encrypted_query_pubkey)
+            .build();
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![CheckIsContactCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[],
+            )?],
+            1,
+            0,
+        )?;
+
+        msg!("Queued is_contact computation: offset={}", computation_offset);
+        Ok(())
+    }
+
+    /// Callback for is_accepted_contact computation
+    #[arcium_callback(encrypted_ix = "is_accepted_contact")]
+    pub fn check_is_contact_callback(
+        ctx: Context<CheckIsContactCallback>,
+        output: SignedComputationOutputs<IsAcceptedContactOutput>,
+    ) -> Result<()> {
+        let result = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(IsAcceptedContactOutput { field_0 }) => field_0,
+            Err(e) => {
+                msg!("MPC computation failed: {}", e);
+                return Err(ErrorCode::AbortedComputation.into());
+            }
+        };
+
+        emit!(ContactCheckResult {
+            ciphertext: result.ciphertexts[0],
+            nonce: result.nonce,
+            encryption_key: result.encryption_key,
+        });
+
+        msg!("is_contact computation completed");
+        Ok(())
+    }
+
+    /// Queue MPC computation to count accepted contacts
+    pub fn count_accepted_contacts(
+        ctx: Context<CountAcceptedContacts>,
+        computation_offset: u64,
+        encrypted_contact_list: Vec<u8>,
+        pub_key: [u8; 32],
+        nonce_list: u128,
+    ) -> Result<()> {
+        let args = ArgBuilder::new()
+            .x25519_pubkey(pub_key)
+            .plaintext_u128(nonce_list)
+            .encrypted_bytes(encrypted_contact_list)
+            .build();
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![CountAcceptedContactsCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[],
+            )?],
+            1,
+            0,
+        )?;
+
+        msg!("Queued count_accepted computation: offset={}", computation_offset);
+        Ok(())
+    }
+
+    /// Callback for count_accepted computation
+    #[arcium_callback(encrypted_ix = "count_accepted")]
+    pub fn count_accepted_contacts_callback(
+        ctx: Context<CountAcceptedContactsCallback>,
+        output: SignedComputationOutputs<CountAcceptedOutput>,
+    ) -> Result<()> {
+        let result = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(CountAcceptedOutput { field_0 }) => field_0,
+            Err(e) => {
+                msg!("MPC computation failed: {}", e);
+                return Err(ErrorCode::AbortedComputation.into());
+            }
+        };
+
+        emit!(ContactCountResult {
+            ciphertext: result.ciphertexts[0],
+            nonce: result.nonce,
+            encryption_key: result.encryption_key,
+        });
+
+        msg!("count_accepted computation completed");
+        Ok(())
+    }
 }
 
 // ========== ACCOUNT STRUCTURES ==========
@@ -1105,4 +1289,169 @@ pub struct CloseGroupKey<'info> {
     pub group_key_share: Account<'info, GroupKeyShare>,
     #[account(mut)]
     pub payer: Signer<'info>,
+}
+
+// ========== ARCIUM MPC CONTEXT STRUCTURES ==========
+
+/// Context for initializing is_accepted_contact computation definition
+#[init_computation_definition_accounts("is_accepted_contact", payer)]
+#[derive(Accounts)]
+pub struct InitIsAcceptedContactCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    /// CHECK: not initialized yet
+    #[account(mut)]
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Context for initializing count_accepted computation definition
+#[init_computation_definition_accounts("count_accepted", payer)]
+#[derive(Accounts)]
+pub struct InitCountAcceptedCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    /// CHECK: not initialized yet
+    #[account(mut)]
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Context for initializing add_two_numbers computation definition
+#[init_computation_definition_accounts("add_two_numbers", payer)]
+#[derive(Accounts)]
+pub struct InitAddTwoNumbersCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    /// CHECK: not initialized yet
+    #[account(mut)]
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Context for queueing is_accepted_contact computation
+#[queue_computation_accounts("is_accepted_contact", payer)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct CheckIsContact<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(init_if_needed, space = 9, payer = payer, seeds = [&SIGN_PDA_SEED], bump, address = derive_sign_pda!())]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: checked by arcium
+    pub mempool_account: UncheckedAccount<'info>,
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: checked by arcium
+    pub executing_pool: UncheckedAccount<'info>,
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: checked by arcium
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_IS_ACCEPTED_CONTACT))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Account<'info, FeePool>,
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Account<'info, ClockAccount>,
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+}
+
+/// Context for is_accepted_contact callback
+#[callback_accounts("is_accepted_contact")]
+#[derive(Accounts)]
+pub struct CheckIsContactCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_IS_ACCEPTED_CONTACT))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: checked by arcium
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    /// CHECK: instructions sysvar
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub instructions_sysvar: AccountInfo<'info>,
+}
+
+/// Context for queueing count_accepted computation
+#[queue_computation_accounts("count_accepted", payer)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct CountAcceptedContacts<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(init_if_needed, space = 9, payer = payer, seeds = [&SIGN_PDA_SEED], bump, address = derive_sign_pda!())]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: checked by arcium
+    pub mempool_account: UncheckedAccount<'info>,
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: checked by arcium
+    pub executing_pool: UncheckedAccount<'info>,
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: checked by arcium
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_COUNT_ACCEPTED))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Account<'info, FeePool>,
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Account<'info, ClockAccount>,
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+}
+
+/// Context for count_accepted callback
+#[callback_accounts("count_accepted")]
+#[derive(Accounts)]
+pub struct CountAcceptedContactsCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_COUNT_ACCEPTED))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: checked by arcium
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    /// CHECK: instructions sysvar
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub instructions_sysvar: AccountInfo<'info>,
+}
+
+// ========== ARCIUM MPC EVENTS ==========
+
+/// Event emitted when contact check computation completes
+#[event]
+pub struct ContactCheckResult {
+    pub ciphertext: [u8; 32],
+    pub nonce: u128,
+    pub encryption_key: [u8; 32],
+}
+
+/// Event emitted when contact count computation completes
+#[event]
+pub struct ContactCountResult {
+    pub ciphertext: [u8; 32],
+    pub nonce: u128,
+    pub encryption_key: [u8; 32],
 }

@@ -29,6 +29,7 @@ import {
   createCloseGroupInstruction,
   createStoreGroupKeyInstruction,
   createCloseGroupKeyInstruction,
+  createCheckIsContactInstruction,
   buildTransaction,
   deserializeWalletDescriptor,
   deserializeGroup,
@@ -42,6 +43,13 @@ import {
 import { deriveEncryptionKeypair, getChatHash } from '../utils/encryption';
 import type { WalletContextType } from './WalletContext';
 import { BACKEND_URL, SOLANA_RPC_URL } from '../config';
+import {
+  getMXEPubKey,
+  encryptContactList,
+  encryptQueryPubkey,
+  waitForComputation,
+  type ContactEntry,
+} from '../utils/arcium';
 
 export interface Contact {
   publicKey: PublicKey;
@@ -109,6 +117,8 @@ interface MessengerContextType {
   groupAvatars: Map<string, string>;
   setGroupAvatarShared: (groupId: string, emoji: string) => Promise<void>;
   wallet: WalletContextType | null;
+  // Arcium MPC methods
+  verifyContactPrivately: (queryPubkey: string) => Promise<boolean | null>;
 }
 
 const MessengerContext = createContext<MessengerContextType | null>(null);
@@ -1329,6 +1339,93 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     }
   };
 
+  // ========== ARCIUM MPC METHODS ==========
+
+  /**
+   * Verify contact privately using Arcium MPC
+   * Returns true if contact is accepted, false if not, null on error
+   */
+  const verifyContactPrivately = async (queryPubkey: string): Promise<boolean | null> => {
+    if (!wallet?.publicKey || !wallet.signTransaction) {
+      console.error('Wallet not connected');
+      return null;
+    }
+
+    try {
+      console.log('🔒 Starting private contact verification via Arcium MPC...');
+
+      // 1. Get MXE public key for encryption
+      const mxePubKey = await getMXEPubKey(connection);
+      console.log('✅ Got MXE public key:', Buffer.from(mxePubKey).toString('hex').slice(0, 16) + '...');
+
+      // 2. Load contact list from on-chain WalletDescriptor
+      const descriptorPDA = getWalletDescriptorPDA(wallet.publicKey);
+      const accountInfo = await connection.getAccountInfo(descriptorPDA);
+
+      if (!accountInfo) {
+        console.log('No contacts found');
+        return false;
+      }
+
+      const descriptor = deserializeWalletDescriptor(accountInfo.data);
+      const contactEntries: ContactEntry[] = descriptor.peers.map(peer => ({
+        pubkey: peer.pubkey.toBytes(),
+        status: peer.status === 'Invited' ? 0 :
+                peer.status === 'Requested' ? 1 :
+                peer.status === 'Accepted' ? 2 :
+                peer.status === 'Rejected' ? 3 : 4, // Blocked
+      }));
+
+      console.log(`📋 Encrypting ${contactEntries.length} contacts for MPC verification...`);
+
+      // 3. Encrypt contact list
+      const encryptedList = await encryptContactList(contactEntries, mxePubKey);
+
+      // 4. Encrypt query pubkey
+      const queryPubkeyBytes = new PublicKey(queryPubkey).toBytes();
+      const encryptedQuery = await encryptQueryPubkey(queryPubkeyBytes, mxePubKey);
+
+      // 5. Generate unique computation offset
+      const computationOffset = Date.now();
+
+      // 6. Build and send queue_computation transaction
+      console.log('📤 Queueing MPC computation...');
+      const instruction = createCheckIsContactInstruction(
+        wallet.publicKey,
+        computationOffset,
+        encryptedList.ciphertext,
+        encryptedQuery.ciphertext,
+        encryptedList.publicKey,
+        BigInt(new DataView(encryptedList.nonce.buffer).getBigUint64(0, true)),
+        BigInt(new DataView(encryptedQuery.nonce.buffer).getBigUint64(0, true))
+      );
+
+      const transaction = await buildTransaction(connection, wallet.publicKey, [instruction]);
+      const signedTx = await wallet.signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
+      await connection.confirmTransaction(signature, 'confirmed');
+
+      console.log('✅ MPC computation queued:', signature);
+
+      // 7. Wait for computation to finalize
+      console.log('⏳ Waiting for MPC nodes to compute result...');
+      await waitForComputation(connection, computationOffset, 60000); // 60s timeout
+
+      console.log('✅ MPC computation completed');
+
+      // 8. Result decryption
+      // NOTE: In production, you'd listen for ContactCheckResult event
+      // and decrypt the result using the cipher from encryptedList/encryptedQuery
+      // For now, we'll return null to indicate success but no result parsed
+      console.log('⚠️ Result parsing not implemented yet - listen for ContactCheckResult event');
+
+      return null;
+    } catch (error) {
+      console.error('❌ Private contact verification failed:', error);
+      return null;
+    }
+  };
+
   // Load profile and contacts when encryption keys are available
   useEffect(() => {
     if (wallet?.publicKey && encryptionKeys) {
@@ -2205,6 +2302,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     groupAvatars,
     setGroupAvatarShared,
     wallet,
+    // Arcium MPC methods
+    verifyContactPrivately,
   };
 
   return (

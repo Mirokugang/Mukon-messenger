@@ -32,6 +32,12 @@ const DISCRIMINATORS = {
   unblock: Buffer.from([0xc2, 0x31, 0xad, 0x2b, 0xf6, 0xa4, 0x0e, 0x0b]), // c231ad2bf6a40e0b
   update_group: Buffer.from([0x09, 0xf2, 0x01, 0x6e, 0x5b, 0x16, 0xac, 0x61]), // 09f2016e5b16ac61
   update_profile: Buffer.from([0x62, 0x43, 0x63, 0xce, 0x56, 0x73, 0xaf, 0x01]), // 624363ce5673af01
+  // Arcium MPC instructions (UPDATE AFTER anchor build + scripts/update-discriminators.js)
+  init_is_accepted_contact_comp_def: Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), // PLACEHOLDER
+  init_count_accepted_comp_def: Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), // PLACEHOLDER
+  init_add_two_numbers_comp_def: Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), // PLACEHOLDER
+  check_is_contact: Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), // PLACEHOLDER
+  count_accepted_contacts: Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), // PLACEHOLDER
 };
 
 // PDA derivation helpers
@@ -866,4 +872,246 @@ export function deserializeGroupKeyShare(data: Buffer): GroupKeyShare {
     encryptedKey,
     nonce,
   };
+}
+
+// ========== ARCIUM MPC INSTRUCTIONS ==========
+
+/**
+ * Import Arcium utilities
+ * Note: These are used by the Arcium instruction builders below
+ */
+import {
+  getMXEAddress,
+  getCompDefAddress,
+  getClusterAddress,
+  getMempoolAddress,
+  getExecutingPoolAddress,
+  getComputationAddress,
+} from './arcium';
+
+/**
+ * Get Arcium program ID
+ */
+const ARCIUM_PROGRAM_ID = new PublicKey('ARC1vt8SFJnGv4fXvsKvkBHmvfNSHM6S5kBQxUe96Xd8');
+
+/**
+ * Get Arcium fee pool address
+ */
+const ARCIUM_FEE_POOL = new PublicKey('ARC2qzR5QYWvFcVPxfpBvTQ3wjcr7qg7rPStGpaBT1DF');
+
+/**
+ * Get Arcium clock account address
+ */
+const ARCIUM_CLOCK = new PublicKey('ARC3JqAVRc8jj1tNe4u1oGbf4VPMHYxj5VhvNhGSC3D6');
+
+/**
+ * Build init_is_accepted_contact_comp_def instruction
+ */
+export function createInitIsAcceptedContactCompDefInstruction(
+  payer: PublicKey
+): TransactionInstruction {
+  const mxeAccount = getMXEAddress();
+  const compDefAccount = getCompDefAddress('is_accepted_contact');
+
+  const data = DISCRIMINATORS.init_is_accepted_contact_comp_def;
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: mxeAccount, isSigner: false, isWritable: true },
+      { pubkey: compDefAccount, isSigner: false, isWritable: true },
+      { pubkey: ARCIUM_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Build init_count_accepted_comp_def instruction
+ */
+export function createInitCountAcceptedCompDefInstruction(
+  payer: PublicKey
+): TransactionInstruction {
+  const mxeAccount = getMXEAddress();
+  const compDefAccount = getCompDefAddress('count_accepted');
+
+  const data = DISCRIMINATORS.init_count_accepted_comp_def;
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: mxeAccount, isSigner: false, isWritable: true },
+      { pubkey: compDefAccount, isSigner: false, isWritable: true },
+      { pubkey: ARCIUM_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Build init_add_two_numbers_comp_def instruction
+ */
+export function createInitAddTwoNumbersCompDefInstruction(
+  payer: PublicKey
+): TransactionInstruction {
+  const mxeAccount = getMXEAddress();
+  const compDefAccount = getCompDefAddress('add_two_numbers');
+
+  const data = DISCRIMINATORS.init_add_two_numbers_comp_def;
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: mxeAccount, isSigner: false, isWritable: true },
+      { pubkey: compDefAccount, isSigner: false, isWritable: true },
+      { pubkey: ARCIUM_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Get sign PDA for Arcium
+ */
+function getSignPDA(): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('ArciumSignerAccount')],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+/**
+ * Build check_is_contact instruction
+ */
+export function createCheckIsContactInstruction(
+  payer: PublicKey,
+  computationOffset: number,
+  encryptedContactList: Uint8Array,
+  encryptedQueryPubkey: Uint8Array,
+  pubKey: Uint8Array,
+  nonceList: bigint,
+  nonceQuery: bigint
+): TransactionInstruction {
+  const signPdaAccount = getSignPDA();
+  const mxeAccount = getMXEAddress();
+  const mempoolAccount = getMempoolAddress();
+  const executingPool = getExecutingPoolAddress();
+  const computationAccount = getComputationAddress(computationOffset);
+  const compDefAccount = getCompDefAddress('is_accepted_contact');
+  const clusterAccount = getClusterAddress();
+
+  // Serialize instruction data
+  // discriminator + computation_offset (u64) + encrypted_contact_list (Vec<u8>) + encrypted_query_pubkey (Vec<u8>) + pub_key ([u8;32]) + nonce_list (u128) + nonce_query (u128)
+  const offsetBuf = Buffer.alloc(8);
+  offsetBuf.writeBigUInt64LE(BigInt(computationOffset), 0);
+
+  const contactListLenBuf = Buffer.alloc(4);
+  contactListLenBuf.writeUInt32LE(encryptedContactList.length, 0);
+
+  const queryPubkeyLenBuf = Buffer.alloc(4);
+  queryPubkeyLenBuf.writeUInt32LE(encryptedQueryPubkey.length, 0);
+
+  const nonceListBuf = Buffer.alloc(16);
+  nonceListBuf.writeBigUInt64LE(nonceList & BigInt('0xFFFFFFFFFFFFFFFF'), 0);
+  nonceListBuf.writeBigUInt64LE(nonceList >> BigInt(64), 8);
+
+  const nonceQueryBuf = Buffer.alloc(16);
+  nonceQueryBuf.writeBigUInt64LE(nonceQuery & BigInt('0xFFFFFFFFFFFFFFFF'), 0);
+  nonceQueryBuf.writeBigUInt64LE(nonceQuery >> BigInt(64), 8);
+
+  const data = Buffer.concat([
+    DISCRIMINATORS.check_is_contact,
+    offsetBuf,
+    contactListLenBuf,
+    Buffer.from(encryptedContactList),
+    queryPubkeyLenBuf,
+    Buffer.from(encryptedQueryPubkey),
+    Buffer.from(pubKey),
+    nonceListBuf,
+    nonceQueryBuf,
+  ]);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: signPdaAccount, isSigner: false, isWritable: true },
+      { pubkey: mxeAccount, isSigner: false, isWritable: false },
+      { pubkey: mempoolAccount, isSigner: false, isWritable: true },
+      { pubkey: executingPool, isSigner: false, isWritable: true },
+      { pubkey: computationAccount, isSigner: false, isWritable: true },
+      { pubkey: compDefAccount, isSigner: false, isWritable: false },
+      { pubkey: clusterAccount, isSigner: false, isWritable: true },
+      { pubkey: ARCIUM_FEE_POOL, isSigner: false, isWritable: true },
+      { pubkey: ARCIUM_CLOCK, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: ARCIUM_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Build count_accepted_contacts instruction
+ */
+export function createCountAcceptedContactsInstruction(
+  payer: PublicKey,
+  computationOffset: number,
+  encryptedContactList: Uint8Array,
+  pubKey: Uint8Array,
+  nonceList: bigint
+): TransactionInstruction {
+  const signPdaAccount = getSignPDA();
+  const mxeAccount = getMXEAddress();
+  const mempoolAccount = getMempoolAddress();
+  const executingPool = getExecutingPoolAddress();
+  const computationAccount = getComputationAddress(computationOffset);
+  const compDefAccount = getCompDefAddress('count_accepted');
+  const clusterAccount = getClusterAddress();
+
+  // Serialize instruction data
+  const offsetBuf = Buffer.alloc(8);
+  offsetBuf.writeBigUInt64LE(BigInt(computationOffset), 0);
+
+  const contactListLenBuf = Buffer.alloc(4);
+  contactListLenBuf.writeUInt32LE(encryptedContactList.length, 0);
+
+  const nonceListBuf = Buffer.alloc(16);
+  nonceListBuf.writeBigUInt64LE(nonceList & BigInt('0xFFFFFFFFFFFFFFFF'), 0);
+  nonceListBuf.writeBigUInt64LE(nonceList >> BigInt(64), 8);
+
+  const data = Buffer.concat([
+    DISCRIMINATORS.count_accepted_contacts,
+    offsetBuf,
+    contactListLenBuf,
+    Buffer.from(encryptedContactList),
+    Buffer.from(pubKey),
+    nonceListBuf,
+  ]);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: signPdaAccount, isSigner: false, isWritable: true },
+      { pubkey: mxeAccount, isSigner: false, isWritable: false },
+      { pubkey: mempoolAccount, isSigner: false, isWritable: true },
+      { pubkey: executingPool, isSigner: false, isWritable: true },
+      { pubkey: computationAccount, isSigner: false, isWritable: true },
+      { pubkey: compDefAccount, isSigner: false, isWritable: false },
+      { pubkey: clusterAccount, isSigner: false, isWritable: true },
+      { pubkey: ARCIUM_FEE_POOL, isSigner: false, isWritable: true },
+      { pubkey: ARCIUM_CLOCK, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: ARCIUM_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
 }
