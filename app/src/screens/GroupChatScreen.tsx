@@ -15,10 +15,12 @@ import { useMessenger } from '../contexts/MessengerContext';
 import { PublicKey } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import { Buffer } from 'buffer';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import ReactionPicker from '../components/ReactionPicker';
 import ChatBackground from '../components/ChatBackground';
-import { getUserProfilePDA } from '../utils/transactions';
+import { getUserProfilePDA, createStoreGroupKeyInstruction, buildTransaction } from '../utils/transactions';
 import { getGroupAvatar } from '../utils/domains';
 
 export default function GroupChatScreen() {
@@ -37,6 +39,7 @@ export default function GroupChatScreen() {
     wallet,
     socket,
     connection,
+    updateGroup,
   } = useMessenger();
 
   const [messageText, setMessageText] = useState('');
@@ -49,6 +52,8 @@ export default function GroupChatScreen() {
   const [quickReactVisible, setQuickReactVisible] = useState<string | null>(null);
   const [memberProfiles, setMemberProfiles] = useState<Map<string, { name: string; avatar: string }>>(new Map());
   const [groupAvatar, setGroupAvatar] = useState<string | null>(null);
+  const [renameDialogVisible, setRenameDialogVisible] = useState(false);
+  const [newName, setNewName] = useState('');
   const flatListRef = useRef<FlatList>(null);
 
   // Get current group
@@ -70,22 +75,38 @@ export default function GroupChatScreen() {
   useEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {groupAvatar ? (
-            <Text style={{ fontSize: 24 }}>{groupAvatar}</Text>
-          ) : (
-            <Avatar.Icon size={32} icon="account-group" style={{ backgroundColor: theme.colors.secondary }} />
-          )}
-          <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.colors.textPrimary }}>
-            {groupName}
-          </Text>
-        </View>
+        <TouchableOpacity
+          onPress={() => {
+            setNewName('');
+            setRenameDialogVisible(true);
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {groupAvatar ? (
+              <Text style={{ fontSize: 24 }}>{groupAvatar}</Text>
+            ) : (
+              <Avatar.Icon size={32} icon="account-group" style={{ backgroundColor: theme.colors.secondary }} />
+            )}
+            <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.colors.textPrimary }}>
+              {groupName}
+            </Text>
+          </View>
+        </TouchableOpacity>
       ),
       headerRight: () => (
-        <IconButton
-          icon="information-outline"
-          onPress={() => navigation.navigate('GroupInfo' as never, { groupId, groupName } as never)}
-        />
+        <View style={{ flexDirection: 'row' }}>
+          <IconButton
+            icon="information-outline"
+            size={20}
+            iconColor={theme.colors.textSecondary}
+            onPress={() => navigation.navigate('GroupInfo' as never, { groupId, groupName } as never)}
+          />
+          <IconButton
+            icon="lock"
+            size={20}
+            iconColor={theme.colors.secondary}
+          />
+        </View>
       ),
     });
   }, [groupName, groupId, groupAvatar]);
@@ -136,6 +157,75 @@ export default function GroupChatScreen() {
 
     loadMemberProfiles();
   }, [currentGroup, connection]);
+
+  // Lazy on-chain key storage (Fix for Feature 1)
+  useEffect(() => {
+    if (!wallet?.publicKey || !wallet.signTransaction) return;
+
+    const storeGroupKeyOnChain = async () => {
+      try {
+        // Check if we have the group key locally
+        const groupKey = groupKeys.get(groupId);
+        if (!groupKey) {
+          console.log('⚠️ No local group key found, skipping on-chain storage');
+          return;
+        }
+
+        // Check if already backed up
+        const backupKey = `groupKeyBackedUp_${wallet.publicKey.toBase58()}_${groupId}`;
+        const alreadyBackedUp = await AsyncStorage.getItem(backupKey);
+        if (alreadyBackedUp === 'true') {
+          return; // Already backed up
+        }
+
+        console.log('💾 Storing group key on-chain for recovery...');
+
+        // Get encryption keys from messenger context
+        const encryptionSig = (window as any).__mukonEncryptionSignature;
+        if (!encryptionSig) {
+          console.warn('⚠️ No encryption signature available');
+          return;
+        }
+
+        // Derive encryption keypair
+        const { deriveEncryptionKeypair } = await import('../utils/encryption');
+        const encryptionKeys = deriveEncryptionKeypair(encryptionSig);
+
+        // Encrypt key with own pubkey
+        const nonce = nacl.randomBytes(nacl.box.nonceLength);
+        const encryptedKey = nacl.box(
+          groupKey,
+          nonce,
+          encryptionKeys.publicKey,
+          encryptionKeys.secretKey
+        );
+
+        // Create instruction
+        const groupIdBytes = Buffer.from(groupId, 'hex');
+        const storeKeyIx = createStoreGroupKeyInstruction(
+          wallet.publicKey,
+          groupIdBytes,
+          encryptedKey,
+          nonce
+        );
+
+        // Build, sign, and send transaction
+        const tx = await buildTransaction(connection, wallet.publicKey, [storeKeyIx]);
+        const signedTx = await wallet.signTransaction(tx);
+        const sig = await connection.sendTransaction(signedTx);
+        await connection.confirmTransaction(sig, 'confirmed');
+
+        // Mark as backed up
+        await AsyncStorage.setItem(backupKey, 'true');
+        console.log('✅ Group key stored on-chain successfully');
+      } catch (error) {
+        console.error('Failed to store group key on-chain:', error);
+        // Non-fatal - local key still works
+      }
+    };
+
+    storeGroupKeyOnChain();
+  }, [groupId, wallet, groupKeys, connection]);
 
   // Load messages and join room on mount
   useFocusEffect(
@@ -210,6 +300,7 @@ export default function GroupChatScreen() {
         replyTo: msg.replyTo,
         repliedToContent,
         reactions: msg.reactions || {},
+        status: msg.status || null, // Feature 5: sent/read status
       };
     });
 
@@ -321,6 +412,31 @@ export default function GroupChatScreen() {
     setReplyToMessage(null);
   };
 
+  const handleRename = async () => {
+    if (!newName.trim() || !currentGroup || !wallet?.publicKey) return;
+
+    try {
+      const isCreator = wallet.publicKey.equals(currentGroup.creator);
+
+      if (isCreator) {
+        // On-chain rename via updateGroup
+        await updateGroup(currentGroup.groupId, newName);
+        Alert.alert('Success', 'Group renamed successfully');
+      } else {
+        // Local rename only (AsyncStorage)
+        const { setGroupLocalName } = await import('../utils/domains');
+        await setGroupLocalName(wallet.publicKey, groupId, newName);
+        Alert.alert('Success', 'Group renamed locally');
+      }
+
+      setRenameDialogVisible(false);
+      setNewName('');
+      navigation.setParams({ groupName: newName } as never);
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to rename group');
+    }
+  };
+
   const renderMessage = ({ item }: { item: any }) => {
     // Get member profile
     const memberProfile = memberProfiles.get(item.sender);
@@ -406,9 +522,20 @@ export default function GroupChatScreen() {
 
                   <Text style={styles.messageText}>{item.content}</Text>
 
-                  <Text style={styles.messageTime}>
-                    {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
+                  <View style={styles.messageFooter}>
+                    <Text style={styles.messageTime}>
+                      {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    {/* Feature 5: Read/sent indicators for outgoing messages */}
+                    {item.isMe && item.status && (
+                      <MaterialCommunityIcons
+                        name="check"
+                        size={12}
+                        color={item.status === 'read' ? theme.colors.secondary : theme.colors.textSecondary}
+                        style={{ marginLeft: 4, opacity: item.status === 'sent' ? 0.4 : 1 }}
+                      />
+                    )}
+                  </View>
                 </TouchableOpacity>
 
                 {/* Reactions display - BELOW the message bubble */}
@@ -562,6 +689,45 @@ export default function GroupChatScreen() {
         onDismiss={() => setReactionPickerVisible(false)}
         onSelect={handleReaction}
       />
+
+      {/* Rename Group Dialog */}
+      <Portal>
+        <Dialog visible={renameDialogVisible} onDismiss={() => setRenameDialogVisible(false)}>
+          <Dialog.Title>Rename Group</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
+              Current: {groupName}
+            </Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+              {currentGroup && wallet?.publicKey?.equals(currentGroup.creator)
+                ? 'You are the admin. Rename will update on-chain for everyone.'
+                : 'You are not the admin. Rename will be local only (your device).'}
+            </Text>
+            <TextInput
+              label="New Name"
+              value={newName}
+              onChangeText={setNewName}
+              mode="outlined"
+              placeholder="Enter new group name"
+              style={{ backgroundColor: theme.colors.surface }}
+              outlineColor={theme.colors.surface}
+              activeOutlineColor={theme.colors.primary}
+              autoFocus
+            />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setRenameDialogVisible(false)}>Cancel</Button>
+            <Button
+              onPress={handleRename}
+              mode="contained"
+              buttonColor={theme.colors.primary}
+              disabled={!newName.trim()}
+            >
+              Save
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </KeyboardAvoidingView>
   );
 }
@@ -629,11 +795,15 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     fontSize: 16,
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
   messageTime: {
     color: theme.colors.textSecondary,
     fontSize: 10,
-    marginTop: 4,
-    alignSelf: 'flex-end',
   },
   inputContainer: {
     padding: 16,

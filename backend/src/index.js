@@ -190,6 +190,13 @@ io.on('connection', (socket) => {
     }
     messages.get(conversationId).push(messageData);
 
+    // Emit ack back to sender only
+    socket.emit('message_ack', {
+      messageId: messageData.id,
+      conversationId,
+      timestamp: messageData.timestamp,
+    });
+
     // Broadcast to conversation (including sender for confirmation)
     const room = io.sockets.adapter.rooms.get(conversationId);
     const roomSize = room ? room.size : 0;
@@ -294,6 +301,23 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('messages_read', ({ conversationId, readerPubkey, latestTimestamp }) => {
+    // Forward to all others in the conversation room
+    socket.to(conversationId).emit('messages_read', {
+      conversationId,
+      readerPubkey,
+      latestTimestamp,
+    });
+  });
+
+  socket.on('group_messages_read', ({ groupId, readerPubkey, latestTimestamp }) => {
+    socket.to(`group_${groupId}`).emit('group_messages_read', {
+      groupId,
+      readerPubkey,
+      latestTimestamp,
+    });
+  });
+
   // ========== GROUP EVENT HANDLERS ==========
 
   // Fix 2f: Separate event for viewing a group (joining the room)
@@ -368,6 +392,13 @@ io.on('connection', (socket) => {
       groupMessages.set(groupId, []);
     }
     groupMessages.get(groupId).push(messageData);
+
+    // Emit ack back to sender only
+    socket.emit('group_message_ack', {
+      messageId: messageData.id,
+      groupId,
+      timestamp: messageData.timestamp,
+    });
 
     // Broadcast to group
     const room = io.sockets.adapter.rooms.get(`group_${groupId}`);

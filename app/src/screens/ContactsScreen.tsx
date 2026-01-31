@@ -10,6 +10,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
 import { useContactNames } from '../hooks/useContactNames';
 import { setContactCustomName, getContactCustomName, getCachedDomain, getGroupAvatar } from '../utils/domains';
+import ContactProfileModal from '../components/ContactProfileModal';
 
 type FilterType = 'All' | 'DMs' | 'Groups' | 'Unread';
 
@@ -26,7 +27,9 @@ export default function ContactsScreen({ navigation }: any) {
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [filter, setFilter] = React.useState<FilterType>('All');
   const [groupAvatars, setGroupAvatars] = React.useState<Map<string, string>>(new Map());
-  const displayNames = useContactNames(messenger.contacts);
+  const [selectedContactForProfile, setSelectedContactForProfile] = React.useState<any>(null);
+  const [profileModalVisible, setProfileModalVisible] = React.useState(false);
+  const displayNames = useContactNames(wallet.publicKey, messenger.contacts);
 
   // Refresh display names and load group avatars when screen comes into focus
   useFocusEffect(
@@ -35,10 +38,11 @@ export default function ContactsScreen({ navigation }: any) {
 
       // Load all group avatars
       const loadGroupAvatars = async () => {
+        if (!wallet.publicKey) return;
         const avatars = new Map<string, string>();
         for (const group of messenger.groups) {
           const groupIdHex = Buffer.from(group.groupId).toString('hex');
-          const avatar = await getGroupAvatar(groupIdHex);
+          const avatar = await getGroupAvatar(wallet.publicKey, groupIdHex);
           if (avatar) {
             avatars.set(groupIdHex, avatar);
           }
@@ -452,6 +456,15 @@ export default function ContactsScreen({ navigation }: any) {
         <Menu.Item
           onPress={() => {
             setMenuVisible(null);
+            setSelectedContactForProfile(item);
+            setProfileModalVisible(true);
+          }}
+          title="View Profile"
+          leadingIcon="account-circle"
+        />
+        <Menu.Item
+          onPress={() => {
+            setMenuVisible(null);
             setRenamingContact({ pubkey: item.pubkey, currentName: item.displayName });
             setNewName('');
             setRenameDialogVisible(true);
@@ -514,11 +527,11 @@ export default function ContactsScreen({ navigation }: any) {
   };
 
   const handleRename = async () => {
-    if (!renamingContact) return;
+    if (!renamingContact || !wallet.publicKey) return;
 
     try {
       const pubkey = new PublicKey(renamingContact.pubkey);
-      await setContactCustomName(pubkey, newName);
+      await setContactCustomName(wallet.publicKey, pubkey, newName);
       setRenameDialogVisible(false);
       setRenamingContact(null);
       setNewName('');
@@ -541,7 +554,7 @@ export default function ContactsScreen({ navigation }: any) {
       state: 'Accepted',
       lastMessage: '', // TODO: Get last group message
       timestamp: '',
-      unread: 0, // TODO: Track group unread counts
+      unread: messenger.unreadCounts.get(Buffer.from(g.groupId).toString('hex')) || 0,
       avatar: '', // TODO: Group emoji avatar
       group: g,
     })),
@@ -728,6 +741,68 @@ export default function ContactsScreen({ navigation }: any) {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
+      {/* Contact Profile Modal */}
+      {selectedContactForProfile && (
+        <ContactProfileModal
+          visible={profileModalVisible}
+          onDismiss={() => {
+            setProfileModalVisible(false);
+            setSelectedContactForProfile(null);
+          }}
+          pubkey={selectedContactForProfile.pubkey}
+          displayName={selectedContactForProfile.displayName}
+          avatar={selectedContactForProfile.avatar}
+          walletAddress={selectedContactForProfile.pubkey}
+          isContact={true}
+          onDeleteContact={() => {
+            Alert.alert(
+              'Delete Contact',
+              `Remove ${selectedContactForProfile.displayName} from your contacts? You can re-add them later.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await messenger.rejectInvitation(new PublicKey(selectedContactForProfile.pubkey));
+                      Alert.alert('Deleted', 'Contact removed');
+                      setProfileModalVisible(false);
+                      setSelectedContactForProfile(null);
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message);
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+          onBlockContact={() => {
+            Alert.alert(
+              'Block Contact',
+              `Block ${selectedContactForProfile.displayName}? They won't be able to contact you until unblocked.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Block',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await messenger.blockContact(new PublicKey(selectedContactForProfile.pubkey));
+                      Alert.alert('Blocked', 'Contact blocked. You can unblock them later.');
+                      setProfileModalVisible(false);
+                      setSelectedContactForProfile(null);
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message);
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+        />
+      )}
     </View>
   );
 }

@@ -129,17 +129,19 @@ export async function reverseLookup(
 }
 
 // Contact custom name storage (local AsyncStorage)
+// All keys now scoped by owner wallet to prevent cross-wallet data leakage
 
 const CUSTOM_NAME_PREFIX = '@mukon_contact_name_';
 
 /**
- * Set a custom name for a contact (local storage)
+ * Set a custom name for a contact (local storage, wallet-scoped)
  */
 export async function setContactCustomName(
-  publicKey: PublicKey,
+  ownerWallet: PublicKey,
+  contactPubkey: PublicKey,
   customName: string
 ): Promise<void> {
-  const key = `${CUSTOM_NAME_PREFIX}${publicKey.toBase58()}`;
+  const key = `${CUSTOM_NAME_PREFIX}${ownerWallet.toBase58()}_${contactPubkey.toBase58()}`;
   if (customName.trim()) {
     await AsyncStorage.setItem(key, customName.trim());
   } else {
@@ -148,23 +150,25 @@ export async function setContactCustomName(
 }
 
 /**
- * Get custom name for a contact
+ * Get custom name for a contact (wallet-scoped)
  * @returns custom name if set, null otherwise
  */
 export async function getContactCustomName(
-  publicKey: PublicKey
+  ownerWallet: PublicKey,
+  contactPubkey: PublicKey
 ): Promise<string | null> {
-  const key = `${CUSTOM_NAME_PREFIX}${publicKey.toBase58()}`;
+  const key = `${CUSTOM_NAME_PREFIX}${ownerWallet.toBase58()}_${contactPubkey.toBase58()}`;
   return await AsyncStorage.getItem(key);
 }
 
 /**
- * Remove custom name for a contact
+ * Remove custom name for a contact (wallet-scoped)
  */
 export async function removeContactCustomName(
-  publicKey: PublicKey
+  ownerWallet: PublicKey,
+  contactPubkey: PublicKey
 ): Promise<void> {
-  const key = `${CUSTOM_NAME_PREFIX}${publicKey.toBase58()}`;
+  const key = `${CUSTOM_NAME_PREFIX}${ownerWallet.toBase58()}_${contactPubkey.toBase58()}`;
   await AsyncStorage.removeItem(key);
 }
 
@@ -175,11 +179,12 @@ export async function removeContactCustomName(
  * 3. Truncated public key
  */
 export async function getContactDisplayName(
-  publicKey: PublicKey,
+  ownerWallet: PublicKey,
+  contactPubkey: PublicKey,
   domainName?: string
 ): Promise<string> {
   // Try custom name first
-  const customName = await getContactCustomName(publicKey);
+  const customName = await getContactCustomName(ownerWallet, contactPubkey);
   if (customName) {
     return customName;
   }
@@ -192,39 +197,85 @@ export async function getContactDisplayName(
   }
 
   // Fallback to truncated pubkey
-  const pubkeyStr = publicKey.toBase58();
+  const pubkeyStr = contactPubkey.toBase58();
   return `${pubkeyStr.slice(0, 4)}...${pubkeyStr.slice(-4)}`;
 }
 
 /**
- * Store resolved domain name for a contact (for faster lookup)
+ * Store resolved domain name for a contact (for faster lookup, wallet-scoped)
  */
 const DOMAIN_CACHE_PREFIX = '@mukon_domain_';
 
 export async function cacheResolvedDomain(
-  publicKey: PublicKey,
+  ownerWallet: PublicKey,
+  contactPubkey: PublicKey,
   domain: string
 ): Promise<void> {
-  const key = `${DOMAIN_CACHE_PREFIX}${publicKey.toBase58()}`;
+  const key = `${DOMAIN_CACHE_PREFIX}${ownerWallet.toBase58()}_${contactPubkey.toBase58()}`;
   await AsyncStorage.setItem(key, domain);
 }
 
 export async function getCachedDomain(
-  publicKey: PublicKey
+  ownerWallet: PublicKey,
+  contactPubkey: PublicKey
 ): Promise<string | null> {
-  const key = `${DOMAIN_CACHE_PREFIX}${publicKey.toBase58()}`;
+  const key = `${DOMAIN_CACHE_PREFIX}${ownerWallet.toBase58()}_${contactPubkey.toBase58()}`;
   return await AsyncStorage.getItem(key);
 }
 
 /**
- * Store group avatar (emoji) locally in AsyncStorage
+ * Store group avatar (emoji) locally in AsyncStorage (wallet-scoped)
  */
 const GROUP_AVATAR_PREFIX = '@mukon_group_avatar_';
 
-export async function setGroupAvatar(groupId: string, emoji: string): Promise<void> {
-  await AsyncStorage.setItem(`${GROUP_AVATAR_PREFIX}${groupId}`, emoji.trim());
+export async function setGroupAvatar(
+  ownerWallet: PublicKey,
+  groupId: string,
+  emoji: string
+): Promise<void> {
+  const key = `${GROUP_AVATAR_PREFIX}${ownerWallet.toBase58()}_${groupId}`;
+  await AsyncStorage.setItem(key, emoji.trim());
 }
 
-export async function getGroupAvatar(groupId: string): Promise<string | null> {
-  return await AsyncStorage.getItem(`${GROUP_AVATAR_PREFIX}${groupId}`);
+export async function getGroupAvatar(
+  ownerWallet: PublicKey,
+  groupId: string
+): Promise<string | null> {
+  const key = `${GROUP_AVATAR_PREFIX}${ownerWallet.toBase58()}_${groupId}`;
+  return await AsyncStorage.getItem(key);
+}
+
+/**
+ * Store group custom name locally in AsyncStorage (wallet-scoped)
+ * For non-admin members to have local-only group names
+ */
+const GROUP_NAME_PREFIX = '@mukon_group_name_';
+
+export async function setGroupLocalName(
+  ownerWallet: PublicKey,
+  groupId: string,
+  name: string
+): Promise<void> {
+  const key = `${GROUP_NAME_PREFIX}${ownerWallet.toBase58()}_${groupId}`;
+  if (name.trim()) {
+    await AsyncStorage.setItem(key, name.trim());
+  } else {
+    await AsyncStorage.removeItem(key);
+  }
+}
+
+export async function getGroupLocalName(
+  ownerWallet: PublicKey,
+  groupId: string
+): Promise<string | null> {
+  const key = `${GROUP_NAME_PREFIX}${ownerWallet.toBase58()}_${groupId}`;
+  return await AsyncStorage.getItem(key);
+}
+
+export async function removeGroupLocalName(
+  ownerWallet: PublicKey,
+  groupId: string
+): Promise<void> {
+  const key = `${GROUP_NAME_PREFIX}${ownerWallet.toBase58()}_${groupId}`;
+  await AsyncStorage.removeItem(key);
 }

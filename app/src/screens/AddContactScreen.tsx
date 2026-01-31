@@ -44,7 +44,9 @@ export default function AddContactScreen({ navigation }: any) {
         resolvedDomain = resolved.domain;
 
         // Cache the domain for later display
-        await cacheResolvedDomain(contactPubkey, resolvedDomain);
+        if (wallet.publicKey) {
+          await cacheResolvedDomain(wallet.publicKey, contactPubkey, resolvedDomain);
+        }
 
         console.log(`Resolved ${address} to ${contactPubkey.toBase58()}`);
       } else {

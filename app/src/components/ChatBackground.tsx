@@ -1,21 +1,19 @@
 import React from 'react';
 import { View, StyleSheet, Dimensions } from 'react-native';
-import Svg, { Path, G } from 'react-native-svg';
-import { theme } from '../theme';
+import Svg, { Path, G, Circle, Rect, Line, Ellipse } from 'react-native-svg';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
 /**
- * Crypto-themed SVG wallpaper for chat screens
- * Renders ~15 crypto-themed icons scattered at low opacity
+ * White doodle-style line art wallpaper for chat screens
+ * Renders 18 stroke-only icons scattered at low opacity
  */
 export default function ChatBackground() {
   return (
     <View style={styles.container} pointerEvents="none">
       <Svg width={SW} height={SH}>
         {ICON_PLACEMENTS.map((placement, index) => {
-          const IconComponent = CRYPTO_ICONS[placement.icon];
-          const color = placement.color === 'primary' ? theme.colors.primary : theme.colors.secondary;
+          const IconComponent = DOODLE_ICONS[placement.icon];
 
           return (
             <G
@@ -23,7 +21,7 @@ export default function ChatBackground() {
               transform={`translate(${placement.x}, ${placement.y}) rotate(${placement.rotation}) scale(${placement.scale})`}
               opacity={placement.opacity}
             >
-              <IconComponent color={color} />
+              <IconComponent />
             </G>
           );
         })}
@@ -32,121 +30,242 @@ export default function ChatBackground() {
   );
 }
 
-// SVG Icon Components (simplified paths)
+// White doodle-style stroke-only icon components
 
-const WalletIcon = ({ color }: { color: string }) => (
+const ChatBubbleIcon = () => (
   <Path
-    d="M2 6 C2 4 4 2 6 2 L18 2 C20 2 22 4 22 6 L22 18 C22 20 20 22 18 22 L6 22 C4 22 2 20 2 18 Z M17 10 L20 10 C21 10 22 11 22 12 L22 14 C22 15 21 16 20 16 L17 16 C16 16 15 15 15 14 L15 12 C15 11 16 10 17 10 Z M17 12 L17 14 L20 14 L20 12 Z"
-    fill={color}
-  />
-);
-
-const KeyIcon = ({ color }: { color: string }) => (
-  <Path
-    d="M7 12 C7 9 9 7 12 7 C15 7 17 9 17 12 C17 13 16.5 14 16 14.5 L22 20.5 L22 22 L20 22 L18.5 20.5 L17 22 L15 20 L16.5 18.5 L14.5 16.5 C14 17 13 17 12 17 C9 17 7 15 7 12 Z M12 10 C10 10 9 11 9 12 C9 13 10 14 12 14 C13 14 14 13 14 12 C14 11 13 10 12 10 Z"
-    fill={color}
-  />
-);
-
-const ShieldIcon = ({ color }: { color: string }) => (
-  <Path
-    d="M12 2 L4 6 L4 12 C4 18 8 21 12 22 C16 21 20 18 20 12 L20 6 Z M12 5 L6 8 L6 12 C6 16 9 18.5 12 19.5 C15 18.5 18 16 18 12 L18 8 Z"
-    fill={color}
-  />
-);
-
-const ChainLinkIcon = ({ color }: { color: string }) => (
-  <Path
-    d="M10 8 L14 8 C16 8 18 10 18 12 C18 14 16 16 14 16 L12 16 M14 16 L10 16 C8 16 6 14 6 12 C6 10 8 8 10 8 L12 8 M8 12 L16 12"
-    stroke={color}
-    strokeWidth="2"
+    d="M4 4 L20 4 C21 4 22 5 22 6 L22 16 C22 17 21 18 20 18 L8 18 L4 22 L4 4 Z"
+    stroke="#FFF"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
     fill="none"
   />
 );
 
-const CoinIcon = ({ color }: { color: string }) => (
-  <>
-    <Path
-      d="M12 2 C6 2 2 6 2 12 C2 18 6 22 12 22 C18 22 22 18 22 12 C22 6 18 2 12 2 Z"
-      fill={color}
-    />
-    <Path
-      d="M12 7 L12 9 M12 15 L12 17 M10 10 L14 10 C15 10 15 11 15 11.5 C15 12 14.5 12.5 14 12.5 L10 12.5 L14 12.5 C14.5 12.5 15 13 15 13.5 C15 14 14.5 14.5 14 14.5 L10 14.5"
-      stroke="#000"
-      strokeWidth="1.5"
-      fill="none"
-    />
-  </>
-);
-
-const HexNodeIcon = ({ color }: { color: string }) => (
+const PaperPlaneIcon = () => (
   <Path
-    d="M12 3 L19 7 L19 17 L12 21 L5 17 L5 7 Z M12 8 L15.5 10 L15.5 14 L12 16 L8.5 14 L8.5 10 Z"
-    fill={color}
+    d="M3 3 L22 12 L3 21 L7 12 L3 3 Z M7 12 L15 12"
+    stroke="#FFF"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    fill="none"
   />
 );
 
-const SolanaSwooshIcon = ({ color }: { color: string }) => (
+const EnvelopeIcon = () => (
   <>
-    <Path d="M4 8 L20 8 L18 10 L6 10 Z" fill={color} />
-    <Path d="M4 12 L20 12 L18 14 L6 14 Z" fill={color} />
-    <Path d="M4 16 L20 16 L18 18 L6 18 Z" fill={color} />
+    <Rect x="3" y="6" width="18" height="12" rx="2" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M3 8 L12 13 L21 8" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  </>
+);
+
+const SmartphoneIcon = () => (
+  <>
+    <Rect x="6" y="2" width="12" height="20" rx="2" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Line x1="12" y1="18" x2="12" y2="18" stroke="#FFF" strokeWidth="2" strokeLinecap="round" />
+  </>
+);
+
+const BellIcon = () => (
+  <>
+    <Path d="M18 8 C18 6 17 4 15 3 C14 2 13 2 12 2 C11 2 10 2 9 3 C7 4 6 6 6 8 C6 12 4 14 4 14 L20 14 C20 14 18 12 18 8 Z" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M10 18 C10 19 11 20 12 20 C13 20 14 19 14 18" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  </>
+);
+
+const SmileyIcon = () => (
+  <>
+    <Circle cx="12" cy="12" r="10" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M8 14 C8 14 9.5 16 12 16 C14.5 16 16 14 16 14" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Circle cx="9" cy="9" r="1" fill="#FFF" />
+    <Circle cx="15" cy="9" r="1" fill="#FFF" />
+  </>
+);
+
+const CameraIcon = () => (
+  <>
+    <Path d="M3 8 L5 6 L8 6 L10 4 L14 4 L16 6 L19 6 L21 8 L21 18 C21 19 20 20 19 20 L5 20 C4 20 3 19 3 18 Z" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Circle cx="12" cy="13" r="3" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  </>
+);
+
+const MagnifyingGlassIcon = () => (
+  <>
+    <Circle cx="10" cy="10" r="7" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Line x1="15" y1="15" x2="21" y2="21" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </>
+);
+
+const LockIcon = () => (
+  <>
+    <Rect x="5" y="11" width="14" height="11" rx="2" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M8 11 L8 7 C8 5 10 3 12 3 C14 3 16 5 16 7 L16 11" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  </>
+);
+
+const KeyIcon = () => (
+  <>
+    <Circle cx="8" cy="12" r="4" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M11 14 L20 5 M17 5 L20 5 L20 8 M14 8 L16 6" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  </>
+);
+
+const ShieldIcon = () => (
+  <Path
+    d="M12 2 L4 6 L4 12 C4 18 8 21 12 22 C16 21 20 18 20 12 L20 6 Z"
+    stroke="#FFF"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    fill="none"
+  />
+);
+
+const LinkChainIcon = () => (
+  <Path
+    d="M10 8 L14 8 C16 8 18 10 18 12 C18 14 16 16 14 16 L10 16 C8 16 6 14 6 12 C6 10 8 8 10 8 M8 12 L16 12"
+    stroke="#FFF"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    fill="none"
+  />
+);
+
+const FingerprintIcon = () => (
+  <>
+    <Path d="M12 6 C9 6 7 8 7 11 L7 14" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M10 11 C10 9.5 11 8 12 8 C13 8 14 9.5 14 11 L14 16" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M17 11 C17 7 15 4 12 4 C9 4 7 7 7 11" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M12 12 L12 18" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  </>
+);
+
+const GlobeIcon = () => (
+  <>
+    <Circle cx="12" cy="12" r="10" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Ellipse cx="12" cy="12" rx="4" ry="10" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Line x1="2" y1="12" x2="22" y2="12" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </>
+);
+
+const WiFiIcon = () => (
+  <>
+    <Path d="M5 12 C7 10 9 9 12 9 C15 9 17 10 19 12" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Path d="M8 15 C9 14 10 13 12 13 C14 13 15 14 16 15" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <Circle cx="12" cy="18" r="1" fill="#FFF" />
+  </>
+);
+
+const StarIcon = () => (
+  <Path
+    d="M12 2 L14 9 L22 9 L16 14 L18 22 L12 17 L6 22 L8 14 L2 9 L10 9 Z"
+    stroke="#FFF"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    fill="none"
+  />
+);
+
+const HeartIcon = () => (
+  <Path
+    d="M12 21 L3 12 C1 10 1 7 3 5 C5 3 8 3 10 5 L12 7 L14 5 C16 3 19 3 21 5 C23 7 23 10 21 12 Z"
+    stroke="#FFF"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    fill="none"
+  />
+);
+
+const LightbulbIcon = () => (
+  <>
+    <Path d="M9 18 L15 18 M10 21 L14 21 M12 3 C9 3 7 5 7 8 C7 10 8 11 9 13 L15 13 C16 11 17 10 17 8 C17 5 15 3 12 3 Z" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
   </>
 );
 
 // Icon registry
-const CRYPTO_ICONS: Record<string, React.FC<{ color: string }>> = {
-  wallet: WalletIcon,
+const DOODLE_ICONS: Record<string, React.FC> = {
+  chatBubble: ChatBubbleIcon,
+  paperPlane: PaperPlaneIcon,
+  envelope: EnvelopeIcon,
+  smartphone: SmartphoneIcon,
+  bell: BellIcon,
+  smiley: SmileyIcon,
+  camera: CameraIcon,
+  magnifyingGlass: MagnifyingGlassIcon,
+  lock: LockIcon,
   key: KeyIcon,
   shield: ShieldIcon,
-  chainLink: ChainLinkIcon,
-  coin: CoinIcon,
-  hexNode: HexNodeIcon,
-  solanaSwoosh: SolanaSwooshIcon,
+  linkChain: LinkChainIcon,
+  fingerprint: FingerprintIcon,
+  globe: GlobeIcon,
+  wifi: WiFiIcon,
+  star: StarIcon,
+  heart: HeartIcon,
+  lightbulb: LightbulbIcon,
 };
 
-// Icon placement data (15 icons scattered across screen)
+// Icon placement data (~32 icons scattered across screen)
 interface IconPlacement {
-  icon: keyof typeof CRYPTO_ICONS;
+  icon: keyof typeof DOODLE_ICONS;
   x: number;
   y: number;
   rotation: number;
   scale: number;
-  color: 'primary' | 'secondary';
   opacity: number;
 }
 
 const ICON_PLACEMENTS: IconPlacement[] = [
-  // Top left cluster
-  { icon: 'wallet', x: SW * 0.05, y: SH * 0.08, rotation: -15, scale: 3, color: 'primary', opacity: 0.04 },
-  { icon: 'key', x: SW * 0.15, y: SH * 0.15, rotation: 25, scale: 2.5, color: 'secondary', opacity: 0.03 },
+  // Row 1 - Top
+  { icon: 'chatBubble', x: SW * 0.05, y: SH * 0.06, rotation: -12, scale: 2.8, opacity: 0.06 },
+  { icon: 'lock', x: SW * 0.22, y: SH * 0.08, rotation: 8, scale: 2.5, opacity: 0.07 },
+  { icon: 'star', x: SW * 0.38, y: SH * 0.05, rotation: -18, scale: 2.3, opacity: 0.06 },
+  { icon: 'envelope', x: SW * 0.55, y: SH * 0.09, rotation: 15, scale: 2.6, opacity: 0.07 },
+  { icon: 'shield', x: SW * 0.72, y: SH * 0.07, rotation: -8, scale: 2.7, opacity: 0.06 },
+  { icon: 'heart', x: SW * 0.88, y: SH * 0.06, rotation: 12, scale: 2.4, opacity: 0.08 },
 
-  // Top right
-  { icon: 'shield', x: SW * 0.75, y: SH * 0.1, rotation: 10, scale: 3, color: 'secondary', opacity: 0.035 },
-  { icon: 'chainLink', x: SW * 0.85, y: SH * 0.18, rotation: -20, scale: 2.5, color: 'primary', opacity: 0.03 },
+  // Row 2
+  { icon: 'key', x: SW * 0.08, y: SH * 0.18, rotation: 22, scale: 2.4, opacity: 0.07 },
+  { icon: 'paperPlane', x: SW * 0.28, y: SH * 0.2, rotation: -15, scale: 2.6, opacity: 0.06 },
+  { icon: 'wifi', x: SW * 0.45, y: SH * 0.19, rotation: 5, scale: 2.3, opacity: 0.08 },
+  { icon: 'smartphone', x: SW * 0.63, y: SH * 0.21, rotation: -20, scale: 2.5, opacity: 0.06 },
+  { icon: 'globe', x: SW * 0.82, y: SH * 0.18, rotation: 10, scale: 2.7, opacity: 0.07 },
 
-  // Middle left
-  { icon: 'coin', x: SW * 0.08, y: SH * 0.35, rotation: 0, scale: 3.5, color: 'primary', opacity: 0.04 },
-  { icon: 'hexNode', x: SW * 0.12, y: SH * 0.45, rotation: 30, scale: 2.8, color: 'secondary', opacity: 0.03 },
+  // Row 3
+  { icon: 'fingerprint', x: SW * 0.12, y: SH * 0.32, rotation: -8, scale: 2.5, opacity: 0.06 },
+  { icon: 'bell', x: SW * 0.32, y: SH * 0.33, rotation: 18, scale: 2.4, opacity: 0.08 },
+  { icon: 'linkChain', x: SW * 0.5, y: SH * 0.31, rotation: -12, scale: 2.6, opacity: 0.06 },
+  { icon: 'lightbulb', x: SW * 0.68, y: SH * 0.34, rotation: 8, scale: 2.3, opacity: 0.07 },
+  { icon: 'camera', x: SW * 0.85, y: SH * 0.32, rotation: -16, scale: 2.5, opacity: 0.06 },
 
-  // Middle center
-  { icon: 'solanaSwoosh', x: SW * 0.4, y: SH * 0.4, rotation: -10, scale: 3, color: 'secondary', opacity: 0.035 },
-  { icon: 'wallet', x: SW * 0.55, y: SH * 0.48, rotation: 20, scale: 2.5, color: 'primary', opacity: 0.03 },
+  // Row 4 - Middle
+  { icon: 'smiley', x: SW * 0.06, y: SH * 0.45, rotation: 12, scale: 2.7, opacity: 0.07 },
+  { icon: 'magnifyingGlass', x: SW * 0.25, y: SH * 0.47, rotation: -10, scale: 2.4, opacity: 0.06 },
+  { icon: 'chatBubble', x: SW * 0.43, y: SH * 0.46, rotation: 20, scale: 2.5, opacity: 0.08 },
+  { icon: 'lock', x: SW * 0.6, y: SH * 0.48, rotation: -14, scale: 2.6, opacity: 0.06 },
+  { icon: 'star', x: SW * 0.78, y: SH * 0.45, rotation: 6, scale: 2.3, opacity: 0.07 },
 
-  // Middle right
-  { icon: 'key', x: SW * 0.8, y: SH * 0.38, rotation: -25, scale: 3, color: 'primary', opacity: 0.04 },
-  { icon: 'shield', x: SW * 0.82, y: SH * 0.52, rotation: 15, scale: 2.5, color: 'secondary', opacity: 0.03 },
+  // Row 5
+  { icon: 'envelope', x: SW * 0.15, y: SH * 0.6, rotation: -18, scale: 2.4, opacity: 0.06 },
+  { icon: 'shield', x: SW * 0.35, y: SH * 0.62, rotation: 14, scale: 2.7, opacity: 0.07 },
+  { icon: 'heart', x: SW * 0.52, y: SH * 0.59, rotation: -8, scale: 2.5, opacity: 0.08 },
+  { icon: 'key', x: SW * 0.7, y: SH * 0.61, rotation: 16, scale: 2.4, opacity: 0.06 },
+  { icon: 'paperPlane', x: SW * 0.88, y: SH * 0.6, rotation: -12, scale: 2.6, opacity: 0.07 },
 
-  // Bottom left
-  { icon: 'hexNode', x: SW * 0.1, y: SH * 0.7, rotation: -15, scale: 3.2, color: 'secondary', opacity: 0.04 },
-  { icon: 'chainLink', x: SW * 0.18, y: SH * 0.8, rotation: 25, scale: 2.8, color: 'primary', opacity: 0.03 },
+  // Row 6
+  { icon: 'wifi', x: SW * 0.1, y: SH * 0.74, rotation: 10, scale: 2.3, opacity: 0.06 },
+  { icon: 'smartphone', x: SW * 0.3, y: SH * 0.76, rotation: -16, scale: 2.5, opacity: 0.08 },
+  { icon: 'globe', x: SW * 0.48, y: SH * 0.73, rotation: 8, scale: 2.7, opacity: 0.06 },
+  { icon: 'fingerprint', x: SW * 0.65, y: SH * 0.77, rotation: -20, scale: 2.4, opacity: 0.07 },
+  { icon: 'bell', x: SW * 0.83, y: SH * 0.74, rotation: 12, scale: 2.6, opacity: 0.06 },
 
-  // Bottom center
-  { icon: 'coin', x: SW * 0.45, y: SH * 0.75, rotation: 0, scale: 3, color: 'primary', opacity: 0.035 },
-
-  // Bottom right
-  { icon: 'solanaSwoosh', x: SW * 0.75, y: SH * 0.72, rotation: 20, scale: 3.5, color: 'secondary', opacity: 0.04 },
-  { icon: 'wallet', x: SW * 0.85, y: SH * 0.85, rotation: -30, scale: 2.5, color: 'primary', opacity: 0.03 },
+  // Row 7 - Bottom
+  { icon: 'linkChain', x: SW * 0.18, y: SH * 0.88, rotation: -14, scale: 2.5, opacity: 0.07 },
+  { icon: 'lightbulb', x: SW * 0.4, y: SH * 0.9, rotation: 18, scale: 2.3, opacity: 0.06 },
 ];
 
 const styles = StyleSheet.create({

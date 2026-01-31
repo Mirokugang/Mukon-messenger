@@ -144,6 +144,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   const encryptionKeysRef = useRef<nacl.BoxKeyPair | null>(null);
   const contactsRef = useRef<Contact[]>([]);
   const groupKeysRef = useRef<Map<string, Uint8Array>>(new Map());
+  const activeGroupRoomRef = useRef<string | null>(null);
   const hasLoadedPersistedKeys = useRef(false); // Guard to prevent race condition on persist
 
   const connection = useMemo(
@@ -163,6 +164,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   useEffect(() => {
     groupKeysRef.current = groupKeys;
   }, [groupKeys]);
+
+  useEffect(() => {
+    activeGroupRoomRef.current = activeGroupRoom;
+  }, [activeGroupRoom]);
 
   // Persist group keys to AsyncStorage (Fix 2e)
   useEffect(() => {
@@ -187,15 +192,36 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
     persistGroupKeys();
   }, [groupKeys, wallet?.publicKey]);
 
+  // Persist unread counts to AsyncStorage (Feature 4)
+  useEffect(() => {
+    if (!wallet?.publicKey) return;
+    if (!hasLoadedPersistedKeys.current) return; // Use same guard
+
+    const persistUnreadCounts = async () => {
+      try {
+        const countsArray = Array.from(unreadCounts.entries());
+        await AsyncStorage.setItem(
+          `unreadCounts_${wallet.publicKey.toBase58()}`,
+          JSON.stringify(countsArray)
+        );
+      } catch (error) {
+        console.error('Failed to persist unread counts:', error);
+      }
+    };
+
+    persistUnreadCounts();
+  }, [unreadCounts, wallet?.publicKey]);
+
   // Load persisted group keys on mount (Fix 2e)
   useEffect(() => {
     if (!wallet?.publicKey) return;
 
-    const loadPersistedGroupKeys = async () => {
+    const loadPersistedData = async () => {
       try {
-        const stored = await AsyncStorage.getItem(`groupKeys_${wallet.publicKey.toBase58()}`);
-        if (stored) {
-          const keysArray = JSON.parse(stored);
+        // Load group keys
+        const storedKeys = await AsyncStorage.getItem(`groupKeys_${wallet.publicKey.toBase58()}`);
+        if (storedKeys) {
+          const keysArray = JSON.parse(storedKeys);
           const keysMap = new Map(
             keysArray.map((item: any) => [
               item.groupId,
@@ -205,14 +231,23 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
           setGroupKeys(keysMap);
           console.log(`✅ Loaded ${keysMap.size} persisted group keys`);
         }
+
+        // Load unread counts (Feature 4)
+        const storedCounts = await AsyncStorage.getItem(`unreadCounts_${wallet.publicKey.toBase58()}`);
+        if (storedCounts) {
+          const countsArray = JSON.parse(storedCounts);
+          const countsMap = new Map(countsArray);
+          setUnreadCounts(countsMap);
+          console.log(`✅ Loaded ${countsMap.size} persisted unread counts`);
+        }
       } catch (error) {
-        console.error('Failed to load persisted group keys:', error);
+        console.error('Failed to load persisted data:', error);
       } finally {
         hasLoadedPersistedKeys.current = true; // Unlock persist effect
       }
     };
 
-    loadPersistedGroupKeys();
+    loadPersistedData();
   }, [wallet?.publicKey]);
 
   // Derive encryption keys from signature obtained during wallet connect
@@ -428,6 +463,36 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
       });
     });
 
+    // Feature 5: Message acks and read receipts (DMs)
+    newSocket.on('message_ack', ({ messageId, conversationId, timestamp }) => {
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        const conversationMessages = updated.get(conversationId) || [];
+        const updatedMessages = conversationMessages.map(m =>
+          m.id === messageId || m.timestamp === timestamp ? { ...m, status: 'sent' } : m
+        );
+        updated.set(conversationId, updatedMessages);
+        return updated;
+      });
+    });
+
+    newSocket.on('messages_read', ({ conversationId, readerPubkey, latestTimestamp }) => {
+      if (readerPubkey === wallet?.publicKey?.toBase58()) return; // Ignore own read receipts
+
+      setMessages((prev) => {
+        const updated = new Map(prev);
+        const conversationMessages = updated.get(conversationId) || [];
+        const updatedMessages = conversationMessages.map(m => {
+          if (m.sender === wallet?.publicKey?.toBase58() && m.timestamp <= latestTimestamp) {
+            return { ...m, status: 'read' };
+          }
+          return m;
+        });
+        updated.set(conversationId, updatedMessages);
+        return updated;
+      });
+    });
+
     // Group event handlers
     newSocket.on('group_message', (message: any) => {
       console.log('📨 Received group message:', message);
@@ -452,6 +517,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
           if (!exists) {
             updated.set(message.groupId, [...groupMsgs, message]);
+
+            // Increment unread if not from self and not viewing this group
+            const currentActiveGroup = activeGroupRoomRef.current;
+            if (message.sender !== wallet?.publicKey?.toBase58() && message.groupId !== currentActiveGroup) {
+              setUnreadCounts(prev => {
+                const updated = new Map(prev);
+                updated.set(message.groupId, (updated.get(message.groupId) || 0) + 1);
+                return updated;
+              });
+            }
           }
 
           return updated;
@@ -471,6 +546,36 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
 
     newSocket.on('group_member_kicked', ({ groupId, memberPubkey }) => {
       console.log('🚫 Member kicked from group:', groupId, memberPubkey);
+    });
+
+    // Feature 5: Message acks and read receipts (Groups)
+    newSocket.on('group_message_ack', ({ messageId, groupId, timestamp }) => {
+      setGroupMessages((prev) => {
+        const updated = new Map(prev);
+        const groupMsgs = updated.get(groupId) || [];
+        const updatedMessages = groupMsgs.map(m =>
+          m.id === messageId || m.timestamp === timestamp ? { ...m, status: 'sent' } : m
+        );
+        updated.set(groupId, updatedMessages);
+        return updated;
+      });
+    });
+
+    newSocket.on('group_messages_read', ({ groupId, readerPubkey, latestTimestamp }) => {
+      if (readerPubkey === wallet?.publicKey?.toBase58()) return; // Ignore own read receipts
+
+      setGroupMessages((prev) => {
+        const updated = new Map(prev);
+        const groupMsgs = updated.get(groupId) || [];
+        const updatedMessages = groupMsgs.map(m => {
+          if (m.sender === wallet?.publicKey?.toBase58() && m.timestamp <= latestTimestamp) {
+            return { ...m, status: 'read' };
+          }
+          return m;
+        });
+        updated.set(groupId, updatedMessages);
+        return updated;
+      });
     });
 
     newSocket.on('group_key_shared', async ({ groupId, senderPubkey, encryptedKey, nonce }) => {
@@ -529,38 +634,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
                 updated.set(groupId, decryptedKey);
                 return updated;
               });
-              console.log('✅ Group key decrypted and stored');
-
-              // Store encrypted key on-chain for recovery
-              if (wallet?.publicKey && wallet.signTransaction) {
-                try {
-                  const groupIdBytes = Buffer.from(groupId, 'hex');
-                  const storeNonce = nacl.randomBytes(nacl.box.nonceLength);
-                  const storeEncryptedKey = nacl.box(
-                    decryptedKey,
-                    storeNonce,
-                    currentEncryptionKeys.publicKey,
-                    currentEncryptionKeys.secretKey
-                  );
-
-                  const storeKeyIx = createStoreGroupKeyInstruction(
-                    wallet.publicKey,
-                    groupIdBytes,
-                    storeEncryptedKey,
-                    storeNonce
-                  );
-
-                  const storeKeyTx = await buildTransaction(connection, wallet.publicKey, [storeKeyIx]);
-                  const signedStoreKeyTx = await wallet.signTransaction(storeKeyTx);
-                  const storeKeySig = await connection.sendTransaction(signedStoreKeyTx);
-                  await connection.confirmTransaction(storeKeySig, 'confirmed');
-
-                  console.log('💾 Stored encrypted group key on-chain for recovery');
-                } catch (storeErr) {
-                  console.error('Failed to store group key on-chain:', storeErr);
-                  // Non-fatal - local key still works
-                }
-              }
+              console.log('✅ Group key decrypted and stored locally');
+              // Note: On-chain storage is now done lazily when user opens the group chat
             } else {
               console.error('❌ Failed to decrypt group key (decryption returned null)');
             }
@@ -887,6 +962,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
             encrypted: encryptedBase64,
             nonce: nonceBase64,
             timestamp,
+            status: 'sending', // Feature 5: Read receipts
           },
         ]);
         return updated;
@@ -920,7 +996,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   };
 
   const joinConversation = (conversationId: string) => {
-    if (socket) {
+    if (socket && wallet?.publicKey) {
       socket.emit('join_conversation', { conversationId });
       setActiveConversation(conversationId);
       setUnreadCounts((prev) => {
@@ -928,6 +1004,18 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
         updated.delete(conversationId);
         return updated;
       });
+
+      // Emit read receipts for latest message (Feature 5)
+      const msgs = messages.get(conversationId) || [];
+      if (msgs.length > 0) {
+        const latestMessage = msgs[msgs.length - 1];
+        socket.emit('messages_read', {
+          conversationId,
+          readerPubkey: wallet.publicKey.toBase58(),
+          latestTimestamp: latestMessage.timestamp,
+        });
+      }
+
       console.log('Joining conversation:', conversationId);
     }
   };
@@ -1652,6 +1740,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
             encrypted: encryptedBase64,
             nonce: nonceBase64,
             timestamp,
+            status: 'sending', // Feature 5: Read receipts
           },
         ]);
         return updated;
@@ -1858,10 +1947,28 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode; wallet: Wa
   };
 
   const joinGroupRoom = (groupId: string) => {
-    if (socket) {
+    if (socket && wallet?.publicKey) {
       // Fix 2f: Use separate event for viewing vs joining as member
       socket.emit('join_group_room', { groupId });
       setActiveGroupRoom(groupId);
+      // Clear unread count for this group
+      setUnreadCounts(prev => {
+        const updated = new Map(prev);
+        updated.delete(groupId);
+        return updated;
+      });
+
+      // Emit read receipts for latest group message (Feature 5)
+      const msgs = groupMessages.get(groupId) || [];
+      if (msgs.length > 0) {
+        const latestMessage = msgs[msgs.length - 1];
+        socket.emit('group_messages_read', {
+          groupId,
+          readerPubkey: wallet.publicKey.toBase58(),
+          latestTimestamp: latestMessage.timestamp,
+        });
+      }
+
       console.log('Joining group room:', groupId);
     }
   };

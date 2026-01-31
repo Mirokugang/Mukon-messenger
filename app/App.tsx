@@ -8,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import { theme } from './src/theme';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { MessengerProvider } from './src/contexts/MessengerContext';
+import { AlertProvider } from './src/contexts/AlertContext';
 import WalletConnectScreen from './src/screens/WalletConnectScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
 import ChatScreen from './src/screens/ChatScreen';
@@ -140,7 +141,9 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <WalletProvider>
         <PaperProvider theme={theme}>
-          <AppNavigator />
+          <AlertProvider>
+            <AppNavigator />
+          </AlertProvider>
         </PaperProvider>
       </WalletProvider>
     </GestureHandlerRootView>

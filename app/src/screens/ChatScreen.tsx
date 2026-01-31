@@ -4,6 +4,7 @@ import { TextInput, IconButton, Text, Avatar, Menu, Dialog, Portal, Button } fro
 import * as Clipboard from 'expo-clipboard';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { useWallet } from '../contexts/WalletContext';
 import { useMessenger } from '../contexts/MessengerContext';
@@ -11,6 +12,7 @@ import { getChatHash } from '../utils/encryption';
 import { getContactCustomName, getCachedDomain, setContactCustomName } from '../utils/domains';
 import ReactionPicker from '../components/ReactionPicker';
 import ChatBackground from '../components/ChatBackground';
+import ContactProfileModal from '../components/ContactProfileModal';
 
 export default function ChatScreen({ route, navigation }: any) {
   const { contact } = route.params;
@@ -24,6 +26,7 @@ export default function ChatScreen({ route, navigation }: any) {
   const [reactingToMessageId, setReactingToMessageId] = React.useState<string | null>(null);
   const [replyToMessage, setReplyToMessage] = React.useState<any>(null);
   const [quickReactVisible, setQuickReactVisible] = React.useState<string | null>(null);
+  const [profileModalVisible, setProfileModalVisible] = React.useState(false);
   const wallet = useWallet();
   const messenger = useMessenger();
   const flatListRef = React.useRef<FlatList>(null);
@@ -135,6 +138,7 @@ export default function ChatScreen({ route, navigation }: any) {
       replyTo: msg.replyTo,
       repliedToContent,
       reactions: msg.reactions || {},
+      status: msg.status || null, // Feature 5: sent/read status
     };
   });
 
@@ -185,31 +189,35 @@ export default function ChatScreen({ route, navigation }: any) {
   React.useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
-        <View style={styles.headerTitle}>
-          {contact.avatar && Array.from(contact.avatar).length === 1 ? (
-            <Text style={styles.headerAvatar}>{contact.avatar}</Text>
-          ) : (
-            <View style={styles.headerAvatarFallback}>
-              <Text style={styles.headerAvatarFallbackText}>
-                {(displayName || contact.pubkey || '?')[0].toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <Text style={styles.headerName}>
-            {displayName}
-          </Text>
-        </View>
+        <TouchableOpacity
+          onPress={() => {
+            setNewName('');
+            setRenameDialogVisible(true);
+          }}
+        >
+          <View style={styles.headerTitle}>
+            {contact.avatar && Array.from(contact.avatar).length === 1 ? (
+              <Text style={styles.headerAvatar}>{contact.avatar}</Text>
+            ) : (
+              <View style={styles.headerAvatarFallback}>
+                <Text style={styles.headerAvatarFallbackText}>
+                  {(displayName || contact.pubkey || '?')[0].toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <Text style={styles.headerName}>
+              {displayName}
+            </Text>
+          </View>
+        </TouchableOpacity>
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row' }}>
           <IconButton
-            icon="pencil"
+            icon="information-outline"
             size={20}
             iconColor={theme.colors.textSecondary}
-            onPress={() => {
-              setNewName('');
-              setRenameDialogVisible(true);
-            }}
+            onPress={() => setProfileModalVisible(true)}
           />
           <IconButton
             icon="lock"
@@ -404,9 +412,20 @@ export default function ChatScreen({ route, navigation }: any) {
 
                   <Text style={styles.messageText}>{item.content}</Text>
 
-                  <Text style={styles.messageTime}>
-                    {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
+                  <View style={styles.messageFooter}>
+                    <Text style={styles.messageTime}>
+                      {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    {/* Feature 5: Read/sent indicators for outgoing messages */}
+                    {item.isMe && item.status && (
+                      <MaterialCommunityIcons
+                        name="check"
+                        size={12}
+                        color={item.status === 'read' ? theme.colors.secondary : theme.colors.textSecondary}
+                        style={{ marginLeft: 4, opacity: item.status === 'sent' ? 0.4 : 1 }}
+                      />
+                    )}
+                  </View>
                 </TouchableOpacity>
 
                 {/* Reactions display - BELOW the message bubble */}
@@ -593,6 +612,59 @@ export default function ChatScreen({ route, navigation }: any) {
         onDismiss={() => setReactionPickerVisible(false)}
         onSelect={handleReaction}
       />
+
+      {/* Contact Profile Modal */}
+      <ContactProfileModal
+        visible={profileModalVisible}
+        onDismiss={() => setProfileModalVisible(false)}
+        pubkey={contact.pubkey}
+        displayName={displayName}
+        avatar={contact.avatar}
+        walletAddress={contact.pubkey}
+        isContact={true}
+        onDeleteContact={() => {
+          Alert.alert(
+            'Delete Contact',
+            `Remove ${displayName} from your contacts? You can re-add them later.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await messenger.deleteContact(new PublicKey(contact.pubkey));
+                    navigation.goBack();
+                  } catch (error: any) {
+                    Alert.alert('Error', error.message);
+                  }
+                },
+              },
+            ]
+          );
+        }}
+        onBlockContact={() => {
+          Alert.alert(
+            'Block Contact',
+            `Block ${displayName}? They won't be able to contact you until unblocked.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Block',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await messenger.blockContact(new PublicKey(contact.pubkey));
+                    navigation.goBack();
+                  } catch (error: any) {
+                    Alert.alert('Error', error.message);
+                  }
+                },
+              },
+            ]
+          );
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -680,11 +752,15 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     fontSize: 16,
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
   messageTime: {
     color: theme.colors.textSecondary,
     fontSize: 10,
-    marginTop: 4,
-    alignSelf: 'flex-end',
   },
   inputContainer: {
     padding: 16,

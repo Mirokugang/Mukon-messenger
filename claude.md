@@ -141,6 +141,7 @@ adb install -r app-debug.apk
 - ✅ Group key distribution (request if offline)
 - ✅ Group rename (admin only, on-chain via updateGroup)
 - ✅ Group emoji avatars (local AsyncStorage, shown in info/header/list)
+- ✅ **On-chain encrypted key backup** - Hybrid storage (AsyncStorage + on-chain) allows key recovery after clearing app data. KEY DIFFERENTIATOR vs WhatsApp/Signal.
 
 **UI/UX:**
 - ✅ Telegram-style drawer navigation
@@ -199,7 +200,8 @@ SOLANA PROGRAM (Anchor + Arcium)
   ├── UserProfile (name, avatar, encryption pubkey)
   ├── WalletDescriptor (peer relationships)
   ├── Group (members, token gate, encryption pubkey)
-  └── GroupInvite (pending invitations)
+  ├── GroupInvite (pending invitations)
+  └── GroupKeyShare (encrypted group key backup per member)
 
   Instructions:
   ├── register() - Create profile + encryption key
@@ -209,6 +211,8 @@ SOLANA PROGRAM (Anchor + Arcium)
   ├── invite_to_group() - Any member can invite
   ├── accept_group_invite() - Join group (checks token gate)
   ├── leave_group/kick_member() - Group management
+  ├── store_group_key() - Store encrypted group key on-chain for recovery
+  ├── close_group_key() - Close key share account and recover rent
   └── update_profile/update_group/close_profile()
 
 MESSAGE BACKEND (WebSocket)

@@ -16,10 +16,15 @@ export interface ContactDisplayInfo {
  * 3. On-chain display name
  * 4. Truncated pubkey
  */
-export function useContactNames(contacts: Array<{ publicKey: PublicKey; displayName?: string }>) {
+export function useContactNames(
+  ownerWallet: PublicKey | null,
+  contacts: Array<{ publicKey: PublicKey; displayName?: string }>
+) {
   const [displayNames, setDisplayNames] = useState<Map<string, ContactDisplayInfo>>(new Map());
 
   useEffect(() => {
+    if (!ownerWallet) return;
+
     const loadDisplayNames = async () => {
       const nameMap = new Map<string, ContactDisplayInfo>();
 
@@ -27,7 +32,7 @@ export function useContactNames(contacts: Array<{ publicKey: PublicKey; displayN
         const pubkeyStr = contact.publicKey.toBase58();
 
         // Check custom name first
-        const customName = await getContactCustomName(contact.publicKey);
+        const customName = await getContactCustomName(ownerWallet, contact.publicKey);
         if (customName) {
           nameMap.set(pubkeyStr, {
             displayName: customName,
@@ -39,7 +44,7 @@ export function useContactNames(contacts: Array<{ publicKey: PublicKey; displayN
         }
 
         // Check cached domain name
-        const cachedDomain = await getCachedDomain(contact.publicKey);
+        const cachedDomain = await getCachedDomain(ownerWallet, contact.publicKey);
         if (cachedDomain) {
           const domainDisplay = cachedDomain.endsWith('.sol') || cachedDomain.endsWith('.skr')
             ? cachedDomain
@@ -67,7 +72,7 @@ export function useContactNames(contacts: Array<{ publicKey: PublicKey; displayN
     };
 
     loadDisplayNames();
-  }, [contacts]);
+  }, [ownerWallet, contacts]);
 
   return displayNames;
 }

@@ -1,15 +1,22 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
-import { TextInput, Button, Text, Switch, Portal, Dialog, List, Checkbox, Searchbar } from 'react-native-paper';
+import { View, StyleSheet, ScrollView, Alert, FlatList, TouchableOpacity } from 'react-native';
+import { TextInput, Button, Text, Switch, Portal, Dialog, List, Checkbox, Searchbar, IconButton } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import { useMessenger } from '../contexts/MessengerContext';
 import { PublicKey } from '@solana/web3.js';
+import { setGroupAvatar } from '../utils/domains';
+import { useWallet } from '../contexts/WalletContext';
+import EmojiPicker from '../components/EmojiPicker';
+import { theme } from '../theme';
 
 export default function CreateGroupScreen() {
   const navigation = useNavigation();
+  const wallet = useWallet();
   const { createGroupWithMembers, contacts, loading } = useMessenger();
 
   const [groupName, setGroupName] = useState('');
+  const [groupEmoji, setGroupEmoji] = useState<string | null>(null);
+  const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
   const [tokenGateEnabled, setTokenGateEnabled] = useState(false);
   const [tokenMint, setTokenMint] = useState('');
   const [minBalance, setMinBalance] = useState('');
@@ -84,8 +91,15 @@ export default function CreateGroupScreen() {
       const invitees = Array.from(selectedContacts).map(pubkeyStr => new PublicKey(pubkeyStr));
 
       const { groupId, txSignature } = await createGroupWithMembers(groupName, invitees, tokenGate);
-      console.log('✅ Group created with', invitees.length, 'invites:', Buffer.from(groupId).toString('hex'));
+      const groupIdHex = Buffer.from(groupId).toString('hex');
+      console.log('✅ Group created with', invitees.length, 'invites:', groupIdHex);
       console.log('Transaction:', txSignature);
+
+      // Save group avatar if selected (Feature 6)
+      if (groupEmoji && wallet.publicKey) {
+        await setGroupAvatar(wallet.publicKey, groupIdHex, groupEmoji);
+        console.log('✅ Group avatar saved:', groupEmoji);
+      }
 
       setShowSuccess(true);
 
@@ -127,6 +141,20 @@ export default function CreateGroupScreen() {
         <Text variant="headlineSmall" style={styles.title}>
           Create New Group
         </Text>
+
+        {/* Group Avatar Selector */}
+        <TouchableOpacity onPress={() => setEmojiPickerVisible(true)} style={styles.avatarSelector}>
+          {groupEmoji ? (
+            <View style={styles.emojiAvatar}>
+              <Text style={styles.emojiAvatarText}>{groupEmoji}</Text>
+            </View>
+          ) : (
+            <View style={styles.emojiAvatarPlaceholder}>
+              <IconButton icon="camera-plus" size={32} iconColor={theme.colors.textSecondary} />
+              <Text style={styles.avatarHint}>Add Group Avatar</Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
         <TextInput
           label="Group Name"
@@ -247,6 +275,16 @@ export default function CreateGroupScreen() {
           </Dialog.Content>
         </Dialog>
       </Portal>
+
+      {/* Emoji Picker for Group Avatar */}
+      <EmojiPicker
+        visible={emojiPickerVisible}
+        onDismiss={() => setEmojiPickerVisible(false)}
+        onSelect={(emoji) => {
+          setGroupEmoji(emoji);
+          setEmojiPickerVisible(false);
+        }}
+      />
     </ScrollView>
   );
 }
@@ -325,6 +363,38 @@ const styles = StyleSheet.create({
   selectionInfo: {
     color: '#4CAF50',
     marginTop: 12,
+    textAlign: 'center',
+  },
+  avatarSelector: {
+    alignSelf: 'center',
+    marginBottom: 24,
+  },
+  emojiAvatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emojiAvatarText: {
+    fontSize: 64,
+  },
+  emojiAvatarPlaceholder: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#333',
+    borderStyle: 'dashed',
+  },
+  avatarHint: {
+    fontSize: 10,
+    color: '#888',
+    marginTop: 4,
     textAlign: 'center',
   },
 });

@@ -7,7 +7,7 @@ import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { theme } from '../theme';
 import EmojiPicker from '../components/EmojiPicker';
-import { getGroupAvatar, setGroupAvatar } from '../utils/domains';
+import { getGroupAvatar, setGroupAvatar, getGroupLocalName, setGroupLocalName } from '../utils/domains';
 
 export default function GroupInfoScreen() {
   const route = useRoute();
@@ -23,6 +23,7 @@ export default function GroupInfoScreen() {
   const [newGroupName, setNewGroupName] = useState('');
   const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
   const [groupAvatar, setGroupAvatarState] = useState<string | null>(null);
+  const [localGroupName, setLocalGroupNameState] = useState<string | null>(null);
 
   useEffect(() => {
     // Find group in loaded groups
@@ -34,19 +35,23 @@ export default function GroupInfoScreen() {
       setIsMember(foundGroup.members.some((m: PublicKey) => m.equals(wallet.publicKey)));
     }
 
-    // Load group avatar
-    const loadAvatar = async () => {
-      const avatar = await getGroupAvatar(groupId);
+    // Load group avatar and local name
+    const loadLocalData = async () => {
+      if (!wallet?.publicKey) return;
+      const avatar = await getGroupAvatar(wallet.publicKey, groupId);
       setGroupAvatarState(avatar);
+
+      const localName = await getGroupLocalName(wallet.publicKey, groupId);
+      setLocalGroupNameState(localName);
     };
-    loadAvatar();
+    loadLocalData();
   }, [groups, groupId, wallet]);
 
-  // Use route groupName or fall back to group.name or default
-  const displayName = routeGroupName || group?.name || 'Group';
+  // Display name priority: local custom name > route groupName > on-chain name > default
+  const displayName = localGroupName || routeGroupName || group?.name || 'Group';
 
   const handleInviteMember = () => {
-    navigation.navigate('InviteMember' as never, { groupId, groupName } as never);
+    navigation.navigate('InviteMember' as never, { groupId, groupName: displayName } as never);
   };
 
   const handleLeaveGroup = () => {
@@ -95,24 +100,33 @@ export default function GroupInfoScreen() {
   };
 
   const handleRename = async () => {
-    if (!newGroupName.trim()) return;
+    if (!newGroupName.trim() || !wallet?.publicKey) return;
 
     try {
-      const groupIdBytes = new Uint8Array(Buffer.from(groupId, 'hex'));
-      await updateGroup(groupIdBytes, newGroupName.trim());
+      if (isAdmin) {
+        // Admin: Update on-chain
+        const groupIdBytes = new Uint8Array(Buffer.from(groupId, 'hex'));
+        await updateGroup(groupIdBytes, newGroupName.trim());
+
+        // Update route params so header shows new name
+        navigation.setParams({ groupName: newGroupName.trim() } as never);
+      } else {
+        // Non-admin: Save locally only
+        await setGroupLocalName(wallet.publicKey, groupId, newGroupName.trim());
+        setLocalGroupNameState(newGroupName.trim());
+      }
+
       setRenameDialogVisible(false);
       setNewGroupName('');
-
-      // Update route params so header shows new name
-      navigation.setParams({ groupName: newGroupName.trim() } as never);
     } catch (error: any) {
       Alert.alert('Error', `Failed to rename group: ${error.message}`);
     }
   };
 
   const handleEmojiSelect = async (emoji: string) => {
+    if (!wallet?.publicKey) return;
     try {
-      await setGroupAvatar(groupId, emoji);
+      await setGroupAvatar(wallet.publicKey, groupId, emoji);
       setGroupAvatarState(emoji);
       setEmojiPickerVisible(false);
     } catch (error: any) {
@@ -132,8 +146,8 @@ export default function GroupInfoScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => isAdmin && setEmojiPickerVisible(true)}
-          disabled={!isAdmin}
+          onPress={() => isMember && setEmojiPickerVisible(true)}
+          disabled={!isMember}
         >
           {groupAvatar ? (
             <View style={styles.avatarContainer}>
@@ -142,7 +156,7 @@ export default function GroupInfoScreen() {
           ) : (
             <Avatar.Text size={80} label={(displayName || 'GR').slice(0, 2).toUpperCase()} />
           )}
-          {isAdmin && (
+          {isMember && (
             <Text style={styles.avatarHint}>Tap to change</Text>
           )}
         </TouchableOpacity>
@@ -150,7 +164,7 @@ export default function GroupInfoScreen() {
           <Text variant="headlineSmall" style={styles.groupName}>
             {displayName}
           </Text>
-          {isAdmin && (
+          {isMember && (
             <IconButton
               icon="pencil"
               size={20}
@@ -264,11 +278,16 @@ export default function GroupInfoScreen() {
       {/* Rename Group Dialog */}
       <Portal>
         <Dialog visible={renameDialogVisible} onDismiss={() => setRenameDialogVisible(false)}>
-          <Dialog.Title>Rename Group</Dialog.Title>
+          <Dialog.Title>Rename Group {!isAdmin && '(Local)'}</Dialog.Title>
           <Dialog.Content>
             <Text style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
               Current: {displayName}
             </Text>
+            {!isAdmin && (
+              <Text style={{ color: theme.colors.textSecondary, marginBottom: 12, fontSize: 12 }}>
+                Local names are only visible to you
+              </Text>
+            )}
             <TextInput
               label="New Group Name"
               value={newGroupName}
